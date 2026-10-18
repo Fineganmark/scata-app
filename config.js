@@ -2,5 +2,5 @@
 // This key is visible to anyone who opens the site, which is normal for Maps keys:
 // protect it in Google Cloud by restricting it to this website's address.
 window.SCATA_CONFIG = {
-  googleMapsKey: ''
+  googleMapsKey: 'AIzaSyAsH--Y7RXtEkbfjs67mZ11u3eFeIvf3Vk'
 };
