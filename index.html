@@ -1,0 +1,1245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script src="config.js"></script>
+</head>
+<body>
+<title>Scata</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700;800&family=Rubik:wght@800;900&display=swap">
+<style>
+/* Layout: one phone-width app column (max 440px) centred on a soft ground; header, scrolling screen, sticky action button. */
+:root {
+  --ground: #eef1ee;
+  --bg: #ffffff;
+  --surface: #f6f8f7;
+  --line: #e4e9e6;
+  --ink: #212b36;
+  --ink-2: #4b5864;
+  --ink-3: #8a96a1;
+  --btn: #212b36;
+  --btn-ink: #ffffff;
+  --green: #00a76f;
+  --green-soft: #d8f3e6;
+  --amber: #ffab00;
+  --amber-soft: #fff7d6;
+  --red: #ff5630;
+  --red-soft: #ffe4dc;
+  --blue: #00b8d9;
+  --blue-soft: #d6f4fa;
+  --violet: #9c3fd0;
+  --map-land: #eef0e6;
+  --map-park: #c9e8c4;
+  --map-water: #b6dcf2;
+  --map-road: #ffffff;
+  --map-road-edge: #d9dccf;
+  --chat-me: #c8f7c5;
+  --shadow: 0 1px 2px rgba(33,43,54,.06), 0 6px 18px rgba(33,43,54,.06);
+  --font-body: "Public Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-logo: "Rubik", "Arial Black", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --ground: #0d1316; --bg: #161c22; --surface: #1e262d; --line: #2b353e; --ink: #eef2f4; --ink-2: #b7c1c9; --ink-3: #7c8893;
+  --btn: #eef2f4; --btn-ink: #161c22; --green: #2fcf91; --green-soft: #12382a; --amber: #ffc13d; --amber-soft: #3a3014;
+  --red: #ff7a5c; --red-soft: #3d2019; --blue: #3fd2ee; --blue-soft: #123540; --violet: #c27ef0;
+  --map-land: #20292a; --map-park: #23402b; --map-water: #1d3d52; --map-road: #34403f; --map-road-edge: #2a3433;
+  --chat-me: #1f4a2c; --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 18px rgba(0,0,0,.25); color-scheme: dark } }
+:root[data-theme="dark"] {
+  --ground: #0d1316; --bg: #161c22; --surface: #1e262d; --line: #2b353e; --ink: #eef2f4; --ink-2: #b7c1c9; --ink-3: #7c8893;
+  --btn: #eef2f4; --btn-ink: #161c22; --green: #2fcf91; --green-soft: #12382a; --amber: #ffc13d; --amber-soft: #3a3014;
+  --red: #ff7a5c; --red-soft: #3d2019; --blue: #3fd2ee; --blue-soft: #123540; --violet: #c27ef0;
+  --map-land: #20292a; --map-park: #23402b; --map-water: #1d3d52; --map-road: #34403f; --map-road-edge: #2a3433;
+  --chat-me: #1f4a2c; --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 18px rgba(0,0,0,.25); color-scheme: dark }
+
+html, body { height: 100%; }
+body { background: var(--ground); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.45; }
+* { box-sizing: border-box; }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+#app { min-height: 100%; display: flex; justify-content: center; }
+.phone { width: 100%; max-width: 440px; min-height: 100%; background: var(--bg); display: flex; flex-direction: column; position: relative; }
+@media (min-width: 480px) { #app { padding-block: 24px; } .phone { min-height: calc(100vh - 48px); border-radius: 28px; box-shadow: var(--shadow); overflow: hidden; } }
+
+.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; padding-block: 10px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.iconbtn { width: 40px; height: 40px; border-radius: 50%; border: 0; background: transparent; display: grid; place-items: center; position: relative; }
+.iconbtn:hover { background: var(--surface); }
+.iconbtn svg { width: 22px; height: 22px; }
+.badge { position: absolute; top: -2px; right: -2px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--red); color: #fff; font-size: 11px; font-weight: 700; display: grid; place-items: center; }
+
+.logo { font-family: var(--font-logo); font-weight: 900; letter-spacing: .02em; color: var(--ink); display: flex; justify-content: center; gap: 1px; line-height: 1; user-select: none; }
+.logo span { display: inline-block; }
+.logo.sm { font-size: 30px; }
+.logo.lg { font-size: 56px; }
+.logo span:nth-child(1) { text-shadow: 3px 3px 0 var(--green); }
+.logo span:nth-child(2) { text-shadow: 3px 3px 0 var(--red); }
+.logo span:nth-child(3) { text-shadow: 3px 3px 0 var(--amber); }
+.logo span:nth-child(4) { text-shadow: 3px 3px 0 var(--blue); }
+.logo span:nth-child(5) { text-shadow: 3px 3px 0 var(--green); }
+.logo-wrap { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.tagline { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); }
+.plus-bolt { color: var(--amber); margin-left: 6px; font-size: 26px; }
+
+.screen { flex: 1; display: flex; flex-direction: column; gap: 16px; padding-block: 8px 24px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.hello { text-align: center; display: grid; gap: 2px; padding-top: 6px; }
+.hello h1 { font-size: 22px; margin: 0; font-weight: 800; text-wrap: balance; }
+.hello p { margin: 0; color: var(--ink-2); font-style: italic; }
+h2.title { font-size: 22px; margin: 0; font-weight: 800; text-wrap: balance; }
+h3 { font-size: 17px; margin: 0; font-weight: 700; text-wrap: balance; }
+.crumbs { display: flex; gap: 10px; align-items: center; color: var(--ink-3); font-size: 14px; }
+.crumbs b { color: var(--ink); font-weight: 500; }
+.muted { color: var(--ink-2); }
+.small { font-size: 13px; }
+.center { text-align: center; }
+
+.card { background: var(--bg); border: 1px solid var(--line); border-radius: 16px; padding: 16px; box-shadow: var(--shadow); display: grid; gap: 12px; min-width: 0; }
+.card.flat { box-shadow: none; }
+.card.note { background: var(--amber-soft); border-color: transparent; box-shadow: none; text-align: center; }
+.card.tint { background: linear-gradient(180deg, var(--bg), var(--amber-soft)); }
+.stack { display: grid; gap: 12px; }
+.row { display: flex; gap: 12px; align-items: center; min-width: 0; }
+.row.between { justify-content: space-between; }
+.grow { flex: 1; min-width: 0; }
+
+.btn { border: 0; border-radius: 10px; background: var(--btn); color: var(--btn-ink); font-weight: 700; padding: 13px 18px; width: 100%; font-size: 15px; }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+.btn.green { background: var(--green); color: #fff; width: auto; padding: 9px 14px; font-size: 14px; display: inline-flex; gap: 6px; align-items: center; }
+.btn.ghost { background: transparent; color: var(--ink); border: 1.5px solid var(--ink); }
+.btn.sm { width: auto; padding: 6px 12px; font-size: 13px; border-radius: 8px; }
+.action { position: sticky; bottom: 0; padding-block: 12px; background: linear-gradient(180deg, transparent, var(--bg) 30%); margin-top: auto; }
+.link { background: none; border: 0; padding: 0; color: var(--green); font-weight: 600; }
+.link.u { color: var(--ink); text-decoration: underline; font-weight: 500; }
+
+.field { position: relative; display: grid; gap: 4px; min-width: 0; }
+.field label { position: absolute; top: -8px; left: 10px; padding: 0 4px; background: var(--bg); font-size: 12px; color: var(--ink-3); }
+.field input, .field select { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 14px 12px; background: var(--bg); font-size: 16px; }
+.field input:focus, .field select:focus { border-color: var(--ink); outline: none; }
+.field .hint { font-size: 12px; color: var(--ink-3); padding-left: 2px; }
+.field .err { font-size: 12px; color: var(--red); padding-left: 2px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 12px; }
+.form { display: grid; gap: 18px; }
+.check { display: flex; gap: 10px; align-items: center; font-weight: 600; }
+.check input { width: 20px; height: 20px; accent-color: var(--green); }
+
+.choice { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; justify-items: center; }
+.mode { width: 58px; height: 58px; border-radius: 50%; border: 0; background: var(--ink-3); color: #fff; display: grid; place-items: center; transition: transform .15s; }
+.mode svg { width: 30px; height: 30px; }
+.mode.on { background: var(--blue); transform: scale(1.06); }
+.seat { width: 54px; height: 54px; border-radius: 50%; border: 0; background: var(--ink-3); color: #fff; font-size: 26px; font-weight: 800; }
+.seat.on { background: var(--violet); }
+.choice-label { font-size: 12px; color: var(--ink-2); text-align: center; margin-top: 4px; }
+
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; }
+.stats > div { display: grid; gap: 2px; justify-items: center; padding: 4px; }
+.stats > div + div { border-left: 1px solid var(--line); }
+.stats .big { font-size: 19px; white-space: nowrap; font-weight: 800; font-variant-numeric: tabular-nums; }
+.stats .lbl { font-size: 13px; color: var(--ink-2); }
+.stats svg { width: 26px; height: 26px; }
+
+.person { display: flex; gap: 12px; align-items: center; padding: 14px; border: 1px solid var(--line); border-radius: 16px; background: var(--bg); box-shadow: var(--shadow); }
+.avatar { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; color: #fff; flex: none; font-size: 16px; }
+.avatar.sm { width: 34px; height: 34px; font-size: 13px; }
+.avatar.xl { width: 96px; height: 96px; font-size: 34px; border: 4px solid var(--bg); }
+.status { font-size: 13px; font-weight: 700; }
+.status.declined { color: var(--red); }
+.status.accepted { color: var(--green); }
+.status.pending { color: var(--amber); }
+
+.map { width: 100%; height: auto; display: block; border-radius: 14px; border: 1px solid var(--line); background: var(--map-land); }
+.gmap { aspect-ratio: 380 / 360; max-width: 100%; overflow: hidden; }
+.map-wrap { position: relative; }
+.km { position: absolute; top: 10px; right: 10px; background: var(--blue); color: #fff; border-radius: 10px; padding: 6px 10px; font-weight: 800; text-align: center; line-height: 1.1; font-size: 18px; }
+.km small { display: block; font-size: 12px; font-weight: 600; }
+
+.cal-day { display: grid; }
+.cal-head { display: flex; justify-content: space-between; background: var(--surface); padding: 8px 12px; font-weight: 700; font-size: 14px; }
+.cal-slot { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 14px; }
+.cal-slot.mine { background: var(--green-soft); }
+.cal-slot.picking { outline: 2px dashed var(--violet); outline-offset: -2px; }
+.cal-who { display: flex; gap: 8px; align-items: center; font-variant-numeric: tabular-nums; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); flex: none; }
+.dot.amber { background: var(--amber); }
+.pill { border: 0; border-radius: 6px; padding: 4px 10px; font-size: 12px; font-weight: 700; background: var(--green); color: #fff; white-space: nowrap; }
+.pill.out { background: transparent; color: var(--ink-2); border: 1px solid var(--line); }
+.pill.violet { background: var(--violet); }
+.cal-nav { display: flex; align-items: center; justify-content: space-between; font-weight: 700; font-size: 16px; }
+
+.tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--line); }
+.tab { background: none; border: 0; padding: 10px 2px; color: var(--ink-3); font-weight: 600; display: flex; gap: 8px; align-items: center; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tab.on { color: var(--ink); border-color: var(--ink); }
+.tab svg { width: 18px; height: 18px; }
+
+.profile-hero { border-radius: 16px; overflow: hidden; border: 1px solid var(--line); box-shadow: var(--shadow); }
+.profile-hero .sky { height: 110px; background: linear-gradient(180deg, var(--blue-soft), var(--green-soft)); position: relative; }
+.profile-hero .sky svg { position: absolute; bottom: 0; left: 0; width: 100%; height: 60px; }
+.profile-hero .who { text-align: center; margin-top: -56px; position: relative; display: grid; justify-items: center; gap: 2px; padding-bottom: 8px; }
+.profile-hero .who b { font-size: 19px; }
+.profile-hero .tabs { justify-content: center; padding: 0 12px; border-top: 1px solid var(--line); border-bottom: 0; }
+
+.table { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.table .trow { display: grid; grid-template-columns: 32px 1fr auto; gap: 10px; align-items: center; padding: 12px; border-top: 1px solid var(--line); font-size: 14px; min-width: 0; }
+.table .trow > span { min-width: 0; overflow-wrap: anywhere; }
+.table .thead { background: var(--surface); color: var(--ink-2); font-weight: 600; border-top: 0; }
+.table .tfoot { display: flex; justify-content: flex-end; gap: 16px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-2); }
+.search { display: flex; gap: 8px; align-items: center; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 12px; }
+.search input { border: 0; outline: none; background: transparent; flex: 1; min-width: 0; }
+.search svg { width: 18px; height: 18px; color: var(--ink-3); }
+
+.drawer-bg { position: fixed; inset: 0; background: rgba(10,16,20,.45); z-index: 20; }
+.drawer { position: fixed; top: 0; bottom: 0; left: 0; width: min(300px, 85vw); background: var(--bg); z-index: 21; padding: calc(20px + env(safe-area-inset-top, 0px)) 16px calc(20px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); display: flex; flex-direction: column; gap: 6px; overflow-y: auto; box-shadow: var(--shadow); }
+.drawer .me { display: flex; gap: 10px; align-items: center; padding: 12px; background: var(--surface); border-radius: 12px; margin-bottom: 10px; }
+.navi { display: flex; gap: 12px; align-items: center; background: none; border: 0; padding: 11px 12px; border-radius: 10px; text-align: left; font-weight: 500; color: var(--ink-2); }
+.navi:hover, .navi.on { background: var(--green-soft); color: var(--ink); }
+.navi svg { width: 20px; height: 20px; }
+.drawer hr { border: 0; border-top: 1px solid var(--line); width: 100%; margin: 8px 0; }
+
+.notif { display: flex; gap: 12px; padding: 12px; border-radius: 12px; align-items: flex-start; }
+.notif.unread { background: var(--green-soft); }
+.notif .ico { width: 36px; height: 36px; border-radius: 50%; background: var(--surface); display: grid; place-items: center; flex: none; }
+.notif .ico svg { width: 18px; height: 18px; }
+
+.bubble-row { display: grid; gap: 4px; }
+.bubble-row.me { justify-items: end; }
+.bubble { padding: 10px 14px; border-radius: 12px; background: var(--surface); max-width: 80%; overflow-wrap: anywhere; }
+.bubble-row.me .bubble { background: var(--chat-me); }
+.chat-input { display: flex; gap: 8px; }
+.chat-input input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 12px; background: var(--bg); }
+
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(20px + env(safe-area-inset-bottom, 0px)); background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 10px; z-index: 30; font-weight: 600; font-size: 14px; max-width: calc(100% - 32px); }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; font-size: 13px; color: var(--ink-2); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+.chart text { fill: var(--ink-3); font-size: 11px; font-family: var(--font-body); }
+.sharing { display: grid; justify-items: center; gap: 6px; color: var(--ink-2); font-size: 14px; }
+.pulse { width: 22px; height: 22px; border-radius: 50%; background: #13b5a6; box-shadow: 0 0 0 0 rgba(19,181,166,.5); animation: pulse 1.6s infinite; }
+@keyframes pulse { 70% { box-shadow: 0 0 0 14px rgba(19,181,166,0); } 100% { box-shadow: 0 0 0 0 rgba(19,181,166,0); } }
+@media (prefers-reduced-motion: reduce) { .pulse { animation: none; } .mode { transition: none; } }
+.demo-btn { display: flex; gap: 12px; align-items: center; justify-content: center; width: 100%; border: 1.5px solid var(--ink); border-radius: 10px; background: var(--bg); padding: 10px; box-shadow: 0 2px 0 var(--ink); }
+.or { display: flex; align-items: center; gap: 10px; color: var(--ink-3); font-size: 12px; font-weight: 700; }
+.or::before, .or::after { content: ""; flex: 1; border-top: 1px dashed var(--line); }
+.who-card { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.who-card button { border: 2px solid var(--line); background: var(--bg); border-radius: 16px; padding: 18px 10px; display: grid; justify-items: center; gap: 10px; font-weight: 700; }
+.who-card button.on { border-color: var(--green); background: var(--green-soft); }
+.who-card svg { width: 54px; height: 54px; }
+.copybox { display: flex; gap: 8px; align-items: center; border: 1px dashed var(--green); border-radius: 10px; padding: 10px 12px; background: var(--green-soft); }
+.copybox code { flex: 1; font-weight: 700; user-select: all; min-width: 0; overflow-wrap: anywhere; }
+.plus-card { background: linear-gradient(160deg, var(--amber-soft), var(--bg)); }
+.feature { display: flex; gap: 10px; align-items: flex-start; }
+.feature svg { width: 22px; height: 22px; color: var(--green); flex: none; margin-top: 1px; }
+.maplink { display: flex; gap: 8px; align-items: center; justify-content: center; border: 1.5px solid var(--line); border-radius: 10px; padding: 10px 12px; color: var(--ink); text-decoration: none; font-weight: 600; background: var(--bg); }
+.maplink:hover { border-color: var(--ink); }
+.maplink svg { width: 18px; height: 18px; color: var(--red); }
+.demo-note { font-size: 12px; color: var(--ink-3); text-align: center; }
+</style>
+
+<div id="app"></div>
+
+<script src="https://unpkg.com/htm@3.1.1/preact/standalone.umd.js"></script>
+<script>
+const { html, render, useState, useEffect, useRef, useMemo } = htmPreact;
+
+/* ---------- icons ---------- */
+const I = {
+  menu: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h12"/></svg>`,
+  back: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>`,
+  walk: html`<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="13" cy="4" r="2"/><path d="M9.8 8.9L7 23h2.1l1.8-8 2.1 2v6h2v-7.5l-2.1-2 .6-3C14.8 12 16.8 13 19 13v-2c-1.9 0-3.5-1-4.3-2.4l-1-1.6c-.4-.6-1-1-1.7-1-.3 0-.5.1-.8.1L6 8.3V13h2V9.6l1.8-.7"/></svg>`,
+  bike: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="16.5" r="3.5"/><circle cx="18.5" cy="16.5" r="3.5"/><path d="M5.5 16.5L9 9h6l3.5 7.5M9 9l3 7.5h-6.5M15 9l-1.2-3H16"/></svg>`,
+  car: html`<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.9 6c-.2-.6-.8-1-1.4-1h-11c-.7 0-1.2.4-1.4 1L3 12v8c0 .6.4 1 1 1h1c.6 0 1-.4 1-1v-1h12v1c0 .6.4 1 1 1h1c.6 0 1-.4 1-1v-8l-2.1-6zM6.5 16c-.8 0-1.5-.7-1.5-1.5S5.7 13 6.5 13s1.5.7 1.5 1.5S7.3 16 6.5 16zm11 0c-.8 0-1.5-.7-1.5-1.5s.7-1.5 1.5-1.5 1.5.7 1.5 1.5-.7 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z"/></svg>`,
+  bus: html`<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 16c0 .9.4 1.7 1 2.2V20c0 .6.4 1 1 1h1c.6 0 1-.4 1-1v-1h8v1c0 .6.4 1 1 1h1c.6 0 1-.4 1-1v-1.8c.6-.5 1-1.3 1-2.2V6c0-3.5-3.6-4-8-4s-8 .5-8 4v10zm3.5 1c-.8 0-1.5-.7-1.5-1.5S6.7 14 7.5 14s1.5.7 1.5 1.5S8.3 17 7.5 17zm9 0c-.8 0-1.5-.7-1.5-1.5s.7-1.5 1.5-1.5 1.5.7 1.5 1.5-.7 1.5-1.5 1.5zm1.5-6H6V6h12v5z"/></svg>`,
+  euro: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M17 6.5A6.5 6.5 0 1 0 17 17.5M4 10h9M4 14h9"/></svg>`,
+  timer: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M9.5 2h5M19 6l1.5-1.5"/></svg>`,
+  co2: html`<svg viewBox="0 0 34 24"><text x="0" y="19" font-size="18" font-weight="800" fill="currentColor" font-family="Public Sans, sans-serif">CO</text><text x="26" y="11" font-size="10" font-weight="800" fill="currentColor" font-family="Public Sans, sans-serif">2</text></svg>`,
+  jam: html`<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 3.5c-.1-.3-.4-.5-.7-.5H2.7c-.3 0-.6.2-.7.5L1 7v4.5c0 .3.2.5.5.5H2v.5c0 .3.2.5.5.5h.5c.3 0 .5-.2.5-.5V12h4v.5c0 .3.2.5.5.5h.5c.3 0 .5-.2.5-.5V12h.5c.3 0 .5-.2.5-.5V7L8 3.5zM2.6 9.5c-.5 0-.8-.3-.8-.8s.3-.8.8-.8.8.3.8.8-.3.8-.8.8zm4.8 0c-.5 0-.8-.3-.8-.8s.3-.8.8-.8.8.3.8.8-.3.8-.8.8zM2 6.5l.8-2.5h4.4l.8 2.5H2z"/><path d="M22 11.5c-.1-.3-.4-.5-.7-.5h-6.6c-.3 0-.6.2-.7.5L13 16v6c0 .4.3.7.7.7h.6c.4 0 .7-.3.7-.7v-.7h6v.7c0 .4.3.7.7.7h.6c.4 0 .7-.3.7-.7v-6l-1-4.5zM15.2 19c-.6 0-1-.4-1-1s.4-1 1-1 1 .4 1 1-.4 1-1 1zm5.6 0c-.6 0-1-.4-1-1s.4-1 1-1 1 .4 1 1-.4 1-1 1zm-6.3-4l.8-2.5h5.4l.8 2.5h-7z"/></svg>`,
+  school: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 10l9-6 9 6M5 10v9h14v-9M9 19v-5h6v5"/></svg>`,
+  parent: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="9" cy="6" r="3"/><circle cx="17" cy="10" r="2.2"/><path d="M4 21v-5a5 5 0 0 1 10 0v5M14 21v-3a3 3 0 0 1 6 0v3"/></svg>`,
+  pin: html`<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>`,
+  bank: html`<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 7v2h20V7L12 2zM4 11v7h3v-7H4zm6.5 0v7h3v-7h-3zM17 11v7h3v-7h-3zM2 20v2h20v-2H2z"/></svg>`,
+  info: html`<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="var(--amber)"/><path d="M12 7.5v.5M12 11v6" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg>`,
+  bell: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/></svg>`,
+  home: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>`,
+  user: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>`,
+  idcard: html`<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM8 8a2 2 0 1 1 0 4 2 2 0 0 1 0-4zm4 8H4v-.6c0-1.3 2.7-2 4-2s4 .7 4 2v.6zm6-2h-4v-2h4v2zm0-4h-4V8h4v2z"/></svg>`,
+  heart: html`<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21s-7.5-4.6-9.5-9.3C1 8 3.4 4 7.2 4c2 0 3.6 1.1 4.8 2.7C13.2 5.1 14.8 4 16.8 4 20.6 4 23 8 21.5 11.7 19.5 16.4 12 21 12 21z"/></svg>`,
+  cal: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>`,
+  chart: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>`,
+  route: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h7a3.5 3.5 0 0 0 0-7H9a3.5 3.5 0 0 1 0-7h7"/></svg>`,
+  mail: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>`,
+  bolt: html`<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg>`,
+  out: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 17l5-5-5-5M15 12H3"/></svg>`,
+  reset: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5"/></svg>`,
+  plus: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`,
+  search: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>`,
+  check: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg>`,
+  chevL: html`<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg>`,
+  chevR: html`<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 5l7 7-7 7"/></svg>`,
+  shield: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5" stroke-linecap="round"/></svg>`,
+  eye: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>`,
+};
+const MODE_ICON = { walk: I.walk, bike: I.bike, car: I.car, bus: I.bus };
+const MODE_NAME = { walk: 'Walking', bike: 'Cycling', car: 'Driving', bus: 'Taking the bus' };
+
+/* ---------- data ---------- */
+const PALETTE = ['#00a76f', '#ff5630', '#ffab00', '#00b8d9', '#9c3fd0', '#ff7a8a', '#3d7cf2', '#13b5a6'];
+const colorFor = (name) => PALETTE[[...name].reduce((a, c) => a + c.charCodeAt(0), 0) % PALETTE.length];
+const initials = (name) => name.split(/\s+/).filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase();
+const uid = () => Math.random().toString(36).slice(2, 9);
+const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+
+function seed() {
+  return {
+    v: 1,
+    route: 'login',
+    user: null,
+    accounts: [
+      { email: 'dermot.connor@etns.ie', password: 'scata123', role: 'school' },
+      { email: 'mark.kelly@gmail.com', password: 'scata123', role: 'parent' },
+    ],
+    school: { first: 'Dermot', last: 'Connor', eircode: 'D12 TR83', name: 'Educate Together National School', students: '100-200', open: '08:30-09:30', close: '14:15-15:00', code: 'sca0001' },
+    parents: [
+      ['Jayvion Simon', 'jayvion.simon@gmail.com', 'active'], ['Deja Brady', 'deja.brady@ucd.ie', 'active'], ['Harrison Stein', 'harrison.stein@mail.com', 'active'],
+      ['Lucian Obrien', 'lucian.obrien@gmail.com', 'invited'], ['Reece Chung', 'reece.chung@gmail.com', 'active'], ['Mary May', 'mary.may@gmail.com', 'active'],
+      ['Tom Williamson', 'tom.w@eircom.net', 'active'], ['Desiree Schmidt', 'desiree.s@gmail.com', 'active'], ['Arnold Aguilar', 'arnold.aguilar@gmail.com', 'active'],
+      ['Selina Boyer', 'selina.boyer@gmail.com', 'invited'], ['Abdul Rahman', 'abdul.rahman@gmail.com', 'active'],
+    ].map(([name, email, status]) => ({ id: uid(), name, email, status })),
+    parent: { first: 'Mark', last: 'Kelly', email: 'mark.kelly@gmail.com', plus: false, children: [{ id: uid(), name: 'Aaron', dob: '2012-04-23' }, { id: uid(), name: 'Darragh', dob: '2010-02-11' }] },
+    commute: { home: 'Kimmage, Dublin 12', mode: 'car', seats: 3, drop: '08:30-09:30', pick: '13:15-14:15', accepted: false },
+    families: [
+      { id: 'desiree', name: 'Desiree Schmidt', kids: 2, mins: 4, status: 'declined', outcome: 'declined' },
+      { id: 'mary', name: 'Mary May', kids: 1, mins: 2, status: 'accepted', outcome: 'accepted' },
+      { id: 'arnold', name: 'Arnold Aguilar', kids: 3, mins: 5, status: 'none', outcome: 'accepted' },
+      { id: 'tom', name: 'Tom Williamson', kids: 1, mins: 3, status: 'pending', outcome: 'accepted' },
+      { id: 'selina', name: 'Selina Boyer', kids: 1, mins: 5, status: 'none', outcome: 'accepted' },
+    ],
+    rota: null,
+    weekOffset: 0,
+    chats: {
+      mary: [
+        { me: false, text: 'Hey are you on time?', t: '8:00 AM' },
+        { me: true, text: 'Yes!', t: '8:00 AM' },
+        { me: false, text: 'Can you remind Timmy to bring his coat home?', t: '8:01 AM' },
+        { me: false, text: 'He forgot it again!!', t: '8:01 AM' },
+        { me: true, text: 'No problem!', t: '8:01 AM' },
+      ],
+    },
+    notifications: [
+      { id: uid(), kind: 'invite', text: 'Mary May accepted your invitation to share the school commute.', at: Date.now() - 3600e3, read: false },
+    ],
+    events: [],
+    trip: { started: null },
+  };
+}
+
+const KEY = 'scata-app-v1';
+function load() {
+  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.v === 1) return s; } catch (e) {}
+  return seed();
+}
+function save(s) { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {} }
+
+/* ---------- maths ---------- */
+const SCHOOL_DAYS = 183, ROUND_KM = 10, EUR_PER_KM = 0.3, CO2_PER_KM = 0.17, MINS_PER_TRIP = 25;
+function savings(mode, groupSize) {
+  // Yearly estimate for one family: every school day has a drop-off and a pick-up.
+  const trips = SCHOOL_DAYS * 2;
+  const shareOfDriving = 1 / Math.max(1, groupSize);
+  const carTripsAvoided = mode === 'car' ? trips * (1 - shareOfDriving) : trips;
+  const km = carTripsAvoided * ROUND_KM;
+  const hoursFreed = trips * (1 - shareOfDriving) * MINS_PER_TRIP / 60;
+  return { eur: Math.round(km * EUR_PER_KM), co2: Math.round(km * CO2_PER_KM), hrs: Math.round(hoursFreed) };
+}
+function footprint(band) {
+  const mid = { '0-100': 60, '100-200': 150, '200-400': 300, '400-800': 600, '800+': 900 }[band] || 150;
+  const trips = Math.round(mid * 0.65 * 2 * 20 / 100) * 100;
+  return { trips, co2: Math.round(trips * 0.5 / 100) * 100 };
+}
+const GM_MODE = { walk: 'walking', bike: 'bicycling', car: 'driving', bus: 'transit' };
+const schoolPlace = (s) => `${s.school.name}, ${s.school.eircode}, Ireland`;
+const gmDirections = (s, mode) => 'https://www.google.com/maps/dir/?api=1' + (s.commute.home ? '&origin=' + encodeURIComponent(s.commute.home + ', Ireland') : '') + '&destination=' + encodeURIComponent(schoolPlace(s)) + '&travelmode=' + GM_MODE[mode || s.commute.mode];
+const gmPlace = (s) => 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(schoolPlace(s));
+function MapLink({ href, children }) { return html`<a class="maplink" href=${href} target="_blank" rel="noopener">${I.pin}${children}</a>`; }
+const fmt = (n) => n.toLocaleString('en-IE');
+
+function buildRota(state) {
+  const members = ['me', ...state.families.filter(f => f.status === 'accepted').map(f => f.id)];
+  const slots = [];
+  DAYS.forEach((d, i) => ['drop', 'pick'].forEach(kind => slots.push({ id: d + kind, day: i, kind })));
+  // Rotate so each family gets an even share; leftover trips go to different families each 4 weeks.
+  slots.forEach((s, i) => { s.who = members[i % members.length]; s.confirmed = s.who !== 'me' && i % 3 !== 1; });
+  return slots;
+}
+
+/* ---------- bits ---------- */
+function Logo({ size = 'sm', plus }) {
+  return html`<div class=${'logo ' + size} aria-label="Scata">${'SCATA'.split('').map(c => html`<span>${c}</span>`)}${plus ? html`<span class="plus-bolt" aria-label="Plus" style="text-shadow:none">⚡</span>` : ''}</div>`;
+}
+function Avatar({ name, size = '' }) {
+  return html`<div class=${'avatar ' + size} style=${'background:' + colorFor(name)} aria-hidden="true">${initials(name)}</div>`;
+}
+function Field({ id, label, value, onInput, type = 'text', hint, err, ...rest }) {
+  return html`<div class="field">
+    <label for=${id}>${label}</label>
+    <input id=${id} type=${type} value=${value} onInput=${e => onInput(e.target.value)} ...${rest} />
+    ${err ? html`<span class="err">${err}</span>` : hint ? html`<span class="hint">${hint}</span>` : ''}
+  </div>`;
+}
+function Select({ id, label, value, onInput, options, hint }) {
+  return html`<div class="field">
+    <label for=${id}>${label}</label>
+    <select id=${id} value=${value} onChange=${e => onInput(e.target.value)}>${options.map(o => html`<option value=${o} selected=${o === value}>${o}</option>`)}</select>
+    ${hint ? html`<span class="hint">${hint}</span>` : ''}
+  </div>`;
+}
+function Action({ children, ...rest }) {
+  return html`<div class="action"><button class="btn" ...${rest}>${children}</button></div>`;
+}
+function Stats({ s, labels = ['saved', 'saved', 'saved'] }) {
+  return html`<div class="stats">
+    <div>${I.euro}<span class="big">€${fmt(s.eur)}</span><span class="lbl">${labels[0]}</span></div>
+    <div>${I.co2}<span class="big">${fmt(s.co2)} kg</span><span class="lbl">${labels[1]}</span></div>
+    <div>${I.timer}<span class="big">${fmt(s.hrs)} hrs</span><span class="lbl">${labels[2]}</span></div>
+  </div>`;
+}
+
+/* ---------- map ---------- */
+const ROUTE = [[70, 300], [95, 285], [120, 290], [140, 262], [168, 250], [190, 214], [212, 196], [232, 158], [236, 120], [262, 104], [290, 86], [318, 70]];
+const routeD = ROUTE.map((p, i) => (i ? 'L' : 'M') + p[0] + ' ' + p[1]).join(' ');
+function along(t) {
+  const seg = []; let total = 0;
+  for (let i = 1; i < ROUTE.length; i++) { const d = Math.hypot(ROUTE[i][0] - ROUTE[i - 1][0], ROUTE[i][1] - ROUTE[i - 1][1]); seg.push(d); total += d; }
+  let target = t * total;
+  for (let i = 0; i < seg.length; i++) {
+    if (target <= seg[i]) { const k = target / seg[i]; return [ROUTE[i][0] + (ROUTE[i + 1][0] - ROUTE[i][0]) * k, ROUTE[i][1] + (ROUTE[i + 1][1] - ROUTE[i][1]) * k]; }
+    target -= seg[i];
+  }
+  return ROUTE[ROUTE.length - 1];
+}
+function MapView({ variant = 'route', progress = 0, label }) {
+  const car = along(progress);
+  const roads = ['M0 120 C80 130 160 100 380 140', 'M0 230 C120 210 220 250 380 220', 'M60 0 C70 120 50 220 90 360', 'M200 0 C190 90 230 200 210 360', 'M300 0 C320 120 290 260 330 360', 'M0 330 L380 300', 'M0 40 L380 70'];
+  return html`<svg class="map" viewBox="0 0 380 360" role="img" aria-label=${label || 'Map of the route to school'}>
+    <rect width="380" height="360" fill="var(--map-land)"/>
+    <path d="M-10 175 C70 160 120 190 190 172 S320 150 390 168 L390 186 C320 170 260 196 190 192 S70 180 -10 194 Z" fill="var(--map-water)"/>
+    <ellipse cx="300" cy="260" rx="46" ry="30" fill="var(--map-park)"/><ellipse cx="80" cy="70" rx="40" ry="24" fill="var(--map-park)"/><rect x="150" y="290" width="70" height="44" rx="10" fill="var(--map-park)"/>
+    ${roads.map(d => html`<path d=${d} fill="none" stroke="var(--map-road-edge)" stroke-width="9"/>`)}
+    ${roads.map(d => html`<path d=${d} fill="none" stroke="var(--map-road)" stroke-width="6"/>`)}
+    ${variant === 'catchment' ? html`
+      <circle cx="200" cy="180" r="150" fill="var(--amber)" fill-opacity=".22" stroke="var(--amber)" stroke-dasharray="6 5" stroke-width="2"/>
+      <circle cx="200" cy="180" r="80" fill="var(--green)" fill-opacity=".22" stroke="var(--green)" stroke-width="3"/>
+      <g transform="translate(200 180)"><path d="M0 0 C-9 -12 -9 -24 0 -24 C9 -24 9 -12 0 0Z" fill="var(--red)"/><circle cy="-16" r="3.5" fill="#fff"/></g>
+      <text x="200" y="208" text-anchor="middle" font-size="11" font-weight="700" fill="var(--ink)" font-family="Public Sans,sans-serif">School</text>
+      <text x="200" y="104" text-anchor="middle" font-size="10" fill="var(--ink-2)" font-family="Public Sans,sans-serif">5 min</text>
+      <text x="200" y="36" text-anchor="middle" font-size="10" fill="var(--ink-2)" font-family="Public Sans,sans-serif">15 min</text>
+    ` : html`
+      ${variant === 'route' ? html`<circle cx="70" cy="300" r="52" fill="var(--amber)" fill-opacity=".25" stroke="var(--green)" stroke-width="2.5"/>` : ''}
+      <path d=${routeD} fill="none" stroke="#2c5cf0" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="70" cy="300" r="6" fill="#fff" stroke="var(--ink)" stroke-width="3"/>
+      <text x="82" y="318" font-size="11" font-weight="700" fill="var(--ink)" font-family="Public Sans,sans-serif">Home</text>
+      <g transform="translate(318 70)"><path d="M0 0 C-9 -12 -9 -24 0 -24 C9 -24 9 -12 0 0Z" fill="var(--red)"/><circle cy="-16" r="3.5" fill="#fff"/></g>
+      <text x="312" y="90" text-anchor="end" font-size="11" font-weight="700" fill="var(--ink)" font-family="Public Sans,sans-serif">School</text>
+      ${variant === 'route' ? [[110, 250], [250, 210], [170, 300], [40, 260]].map(([x, y]) => html`<circle cx=${x} cy=${y} r="7" fill="var(--violet)" stroke="#fff" stroke-width="2"/>`) : ''}
+      ${variant === 'live' ? html`<g transform=${`translate(${car[0]} ${car[1]})`}><circle r="15" fill="#2c5cf0" fill-opacity=".18"/><circle r="10" fill="var(--red)" stroke="#fff" stroke-width="2.5"/><path d="M-5 1h10M-4 -2l1.2-3h5.6l1.2 3" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round"/></g>` : ''}
+    `}
+  </svg>`;
+}
+
+/* ---------- Google Maps (used when the site has a Maps key in config.js) ---------- */
+const MAPS_KEY = (window.SCATA_CONFIG && window.SCATA_CONFIG.googleMapsKey) || '';
+let mapsPromise = null;
+function loadMaps() {
+  if (!MAPS_KEY) return Promise.reject(new Error('no key'));
+  if (window.google && window.google.maps) return Promise.resolve(window.google.maps);
+  if (!mapsPromise) mapsPromise = new Promise((resolve, reject) => {
+    window.__scataMapsReady = () => resolve(window.google.maps);
+    window.gm_authFailure = () => reject(new Error('Google Maps rejected the key'));
+    const tag = document.createElement('script');
+    tag.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(MAPS_KEY) + '&callback=__scataMapsReady&loading=async&region=IE';
+    tag.async = true; tag.onerror = () => reject(new Error('Google Maps did not load'));
+    document.head.appendChild(tag);
+  });
+  return mapsPromise;
+}
+const GM_TRAVEL = { walk: 'WALKING', bike: 'BICYCLING', car: 'DRIVING', bus: 'TRANSIT' };
+function pointAlong(path, t) {
+  if (!path.length) return null;
+  const seg = []; let total = 0;
+  for (let i = 1; i < path.length; i++) { const d = Math.hypot(path[i].lat() - path[i - 1].lat(), path[i].lng() - path[i - 1].lng()); seg.push(d); total += d; }
+  let target = t * total;
+  for (let i = 0; i < seg.length; i++) {
+    if (target <= seg[i] && seg[i] > 0) { const k = target / seg[i]; return { lat: path[i].lat() + (path[i + 1].lat() - path[i].lat()) * k, lng: path[i].lng() + (path[i + 1].lng() - path[i].lng()) * k }; }
+    target -= seg[i];
+  }
+  const last = path[path.length - 1]; return { lat: last.lat(), lng: last.lng() };
+}
+function GoogleMap({ s, variant, mode, progress = 0, onInfo, onFail, label }) {
+  const el = useRef(), map = useRef(), car = useRef(), path = useRef([]), extras = useRef([]);
+  const travel = mode || s.commute.mode;
+  const dest = schoolPlace(s);
+  const origin = s.commute.home ? s.commute.home + ', Ireland' : '';
+  useEffect(() => {
+    let dead = false;
+    loadMaps().then(gm => {
+      if (dead || !el.current) return;
+      if (!map.current) map.current = new gm.Map(el.current, { center: { lat: 53.33, lng: -6.29 }, zoom: 13, disableDefaultUI: true, zoomControl: true, gestureHandling: 'cooperative', clickableIcons: false });
+      extras.current.forEach(x => x.setMap(null)); extras.current = [];
+      const add = (x) => { extras.current.push(x); return x; };
+      if (variant === 'catchment' || !origin) {
+        new gm.Geocoder().geocode({ address: dest, region: 'ie' }, (res, status) => {
+          if (dead) return;
+          if (status !== 'OK' || !res[0]) { onFail && onFail(); return; }
+          const c = res[0].geometry.location;
+          map.current.setCenter(c); map.current.setZoom(variant === 'catchment' ? 13 : 15);
+          add(new gm.Marker({ map: map.current, position: c, title: s.school.name }));
+          if (variant === 'catchment') {
+            add(new gm.Circle({ map: map.current, center: c, radius: 3000, strokeColor: '#ffab00', strokeOpacity: .9, strokeWeight: 2, fillColor: '#ffab00', fillOpacity: .15 }));
+            add(new gm.Circle({ map: map.current, center: c, radius: 1000, strokeColor: '#00a76f', strokeWeight: 3, fillColor: '#00a76f', fillOpacity: .18 }));
+          }
+        });
+        return;
+      }
+      const renderer = add(new gm.DirectionsRenderer({ map: map.current, suppressMarkers: false, preserveViewport: false, polylineOptions: { strokeColor: '#2c5cf0', strokeWeight: 5 } }));
+      new gm.DirectionsService().route({ origin, destination: dest, travelMode: gm.TravelMode[GM_TRAVEL[travel]], region: 'ie' }, (res, status) => {
+        if (dead) return;
+        if (status !== 'OK') { onFail && onFail(); return; }
+        renderer.setDirections(res);
+        const leg = res.routes[0].legs[0];
+        path.current = res.routes[0].overview_path || [];
+        onInfo && onInfo({ km: Math.round(leg.distance.value / 100) / 10, mins: Math.round(leg.duration.value / 60) });
+        if (variant === 'route') {
+          const h = leg.start_location;
+          [[.004, .006], [-.003, .008], [.006, -.004], [-.005, -.006]].forEach(([a, b]) => add(new gm.Marker({ map: map.current, position: { lat: h.lat() + a, lng: h.lng() + b }, title: 'A Scata family near you', icon: { path: gm.SymbolPath.CIRCLE, scale: 7, fillColor: '#9c3fd0', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 } })));
+        }
+        if (variant === 'live') {
+          car.current = add(new gm.Marker({ map: map.current, position: pointAlong(path.current, progress), title: 'Car on the school run', icon: { path: gm.SymbolPath.CIRCLE, scale: 10, fillColor: '#ff5630', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 }, zIndex: 9 }));
+        }
+      });
+    }, () => onFail && onFail());
+    return () => { dead = true; };
+  }, [variant, travel, dest, origin]);
+  useEffect(() => { if (car.current && path.current.length) car.current.setPosition(pointAlong(path.current, progress)); }, [progress]);
+  return html`<div ref=${el} class="map gmap" role="region" aria-label=${label || 'Google map'}></div>`;
+}
+function SmartMap(props) {
+  const [failed, setFailed] = useState(false);
+  if (!MAPS_KEY || failed) return html`<${MapView} variant=${props.variant} progress=${props.progress} label=${props.label} />`;
+  return html`<${GoogleMap} ...${props} onFail=${() => setFailed(true)} />`;
+}
+
+/* ---------- charts ---------- */
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'];
+const BARS = [47, 33, 40, 47, 40, 40, 70, 87, 35];
+const EURO = [12, 14, 20, 38, 38, 38, 45, 50, 32];
+const TIME = [8, 10, 18, 30, 44, 42, 54, 60, 36];
+function ReportChart() {
+  const W = 320, H = 220, L = 30, B = 24, T = 10, R = 8;
+  const x = (i) => L + (i + .5) * (W - L - R) / MONTHS.length;
+  const y = (v) => H - B - v / 100 * (H - B - T);
+  const smooth = (arr) => arr.map((v, i) => { if (!i) return `M${x(0)} ${y(v)}`; const px = x(i - 1), cx = x(i); const mx = (px + cx) / 2; return `C${mx} ${y(arr[i - 1])} ${mx} ${y(v)} ${cx} ${y(v)}`; }).join(' ');
+  return html`<svg class="chart" viewBox=${`0 0 ${W} ${H}`} role="img" aria-label="Monthly savings, January to September">
+    ${[0, 20, 40, 60, 80, 100].map(v => html`<g><line x1=${L} x2=${W - R} y1=${y(v)} y2=${y(v)} stroke="var(--line)" stroke-dasharray="3 4"/><text x=${L - 6} y=${y(v) + 4} text-anchor="end">${v}</text></g>`)}
+    ${BARS.map((v, i) => html`<rect x=${x(i) - 4} y=${y(v)} width="8" height=${y(0) - y(v)} rx="2" fill="var(--green)"/>`)}
+    <path d=${smooth(EURO) + ` L${x(8)} ${y(0)} L${x(0)} ${y(0)} Z`} fill="var(--amber)" fill-opacity=".1"/>
+    <path d=${smooth(EURO)} fill="none" stroke="var(--amber)" stroke-width="2.5"/>
+    <path d=${smooth(TIME)} fill="none" stroke="var(--blue)" stroke-width="2.5"/>
+    <circle cx=${x(8)} cy=${y(TIME[8])} r="3.5" fill="var(--blue)"/><circle cx=${x(8)} cy=${y(EURO[8])} r="3.5" fill="var(--amber)"/>
+    ${MONTHS.map((m, i) => html`<text x=${x(i)} y=${H - 6} text-anchor="middle">${m}</text>`)}
+  </svg>`;
+}
+function Pie({ data }) {
+  const total = data.reduce((a, d) => a + d.v, 0); let a0 = -Math.PI / 2; const r = 100, c = 110;
+  return html`<svg class="chart" viewBox="0 0 220 220" role="img" aria-label="Trips by commute type" style="max-width:240px;justify-self:center">
+    ${data.map(d => { const a1 = a0 + d.v / total * Math.PI * 2; const large = a1 - a0 > Math.PI ? 1 : 0;
+      const p = `M${c} ${c} L${c + r * Math.cos(a0)} ${c + r * Math.sin(a0)} A${r} ${r} 0 ${large} 1 ${c + r * Math.cos(a1)} ${c + r * Math.sin(a1)} Z`;
+      const mid = (a0 + a1) / 2; const lx = c + r * .62 * Math.cos(mid), ly = c + r * .62 * Math.sin(mid); a0 = a1;
+      return html`<g><path d=${p} fill=${d.c} stroke="var(--bg)" stroke-width="2"/><text x=${lx} y=${ly + 4} text-anchor="middle" style="fill:#fff;font-size:12px;font-weight:700">${Math.round(d.v / total * 100)}%</text></g>`; })}
+  </svg>`;
+}
+
+/* ---------- app ---------- */
+function App() {
+  const [s, setS] = useState(load);
+  const [drawer, setDrawer] = useState(false);
+  const [toast, setToast] = useState('');
+  const toastT = useRef();
+  const update = (fn) => setS(prev => { const next = JSON.parse(JSON.stringify(prev)); fn(next); return next; });
+  const go = (route) => { update(n => { n.route = route; }); setDrawer(false); try { document.querySelector('.phone').scrollIntoView(); window.scrollTo(0, 0); } catch (e) {} };
+  const say = (msg) => { setToast(msg); clearTimeout(toastT.current); toastT.current = setTimeout(() => setToast(''), 2600); };
+  useEffect(() => save(s), [s]);
+
+  // Simulated other parents: queued replies resolve after a short wait.
+  useEffect(() => {
+    const t = setInterval(() => {
+      const now = Date.now();
+      setS(prev => {
+        const due = prev.events.filter(e => e.at <= now);
+        if (!due.length) return prev;
+        const n = JSON.parse(JSON.stringify(prev));
+        n.events = n.events.filter(e => e.at > now);
+        due.forEach(e => {
+          if (e.type === 'invite') {
+            const f = n.families.find(x => x.id === e.fam); if (!f || f.status !== 'pending') return;
+            f.status = f.outcome;
+            n.notifications.unshift({ id: uid(), kind: 'invite', text: `${f.name} ${f.outcome === 'accepted' ? 'accepted' : 'declined'} your invitation to share the school commute.`, at: now, read: false });
+            if (f.outcome === 'accepted' && n.rota) n.rota = buildRota(n);
+          }
+          if (e.type === 'reply') {
+            (n.chats[e.fam] = n.chats[e.fam] || []).push({ me: false, text: e.text, t: clock(new Date()) });
+          }
+          if (e.type === 'swap') {
+            const f = n.families.find(x => x.id === e.fam);
+            n.notifications.unshift({ id: uid(), kind: 'cal', text: `${f ? f.name : 'A parent'} agreed to swap: you now have ${e.label}.`, at: now, read: false });
+            const slot = n.rota && n.rota.find(x => x.id === e.slot); if (slot) slot.confirmed = true;
+          }
+          if (e.type === 'update') {
+            const slot = n.rota && n.rota.find(x => x.id === e.slot); if (slot) slot.confirmed = true;
+            const f = n.families.find(x => x.id === e.fam);
+            n.notifications.unshift({ id: uid(), kind: 'cal', text: `${f ? f.name : 'A parent'} confirmed their ${e.label} slot.`, at: now, read: false });
+          }
+        });
+        return n;
+      });
+    }, 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const ctx = { s, update, go, say, setDrawer };
+  const r = s.route;
+  const authed = s.user;
+  const screens = {
+    login: Login, register: Register, choice: Choice, schoolInfo: SchoolInfo, parentInfo: ParentInfo,
+    schoolOverview: SchoolOverview, invite: InviteParents, schoolProfile: SchoolProfile, reports: Reports,
+    setup: Setup, match: Match, terms: Terms, manage: Manage, calendar: Calendar, trip: NextTrip,
+    profile: ParentProfile, commutes: Commutes, newChild: NewChild, notifications: Notifications, plus: Plus, live: Live,
+  };
+  const Screen = screens[r] || Login;
+  const preAuth = ['login', 'register', 'choice', 'schoolInfo', 'parentInfo'].includes(r);
+  const unread = s.notifications.filter(n => !n.read).length;
+  const meName = authed ? (authed.role === 'school' ? `${s.school.first} ${s.school.last}` : `${s.parent.first} ${s.parent.last}`) : '';
+  const plusOn = authed && authed.role === 'parent' && s.parent.plus;
+
+  return html`<div class="phone">
+    ${!preAuth && authed ? html`<header class="top">
+      <button class="iconbtn" aria-label="Open menu" onClick=${() => setDrawer(true)}>${I.menu}</button>
+      <${Logo} plus=${plusOn} />
+      <button class="iconbtn" aria-label=${authed.role === 'parent' ? `Notifications, ${unread} unread` : 'Profile'} onClick=${() => go(authed.role === 'parent' ? 'notifications' : 'schoolProfile')}>
+        <${Avatar} name=${meName} size="sm" />${authed.role === 'parent' && unread ? html`<span class="badge">${unread}</span>` : ''}
+      </button>
+    </header>` : ''}
+    <${Screen} ...${ctx} />
+    ${drawer ? html`<${Drawer} ...${ctx} meName=${meName} />` : ''}
+    ${toast ? html`<div class="toast" role="status">${toast}</div>` : ''}
+  </div>`;
+}
+const clock = (d) => `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${d.getHours() < 12 ? 'AM' : 'PM'}`;
+
+function Drawer({ s, go, update, say, setDrawer, meName }) {
+  const school = s.user.role === 'school';
+  const items = school
+    ? [['schoolOverview', 'Overview', I.home], ['invite', 'Invite parents', I.mail], ['schoolProfile', 'School profile', I.user], ['reports', 'Reports', I.chart]]
+    : [['manage', 'My commute', I.home], ['calendar', 'Calendar', I.cal], ['trip', 'Next school trip', I.route], ['commutes', 'Commutes', I.car], ['profile', 'My profile', I.user], ['notifications', 'Notifications', I.bell], ['plus', s.parent.plus ? 'Scata Plus (on)' : 'Get Scata Plus', I.bolt]];
+  return html`<div class="drawer-bg" onClick=${() => setDrawer(false)}></div>
+  <nav class="drawer" aria-label="Main menu">
+    <div class="me"><${Avatar} name=${meName} size="sm" /><div><b>${meName}</b><div class="small muted">${school ? 'School manager' : 'Parent'} · ${s.school.name}</div></div></div>
+    ${items.map(([r, label, ico]) => html`<button class=${'navi' + (s.route === r ? ' on' : '')} onClick=${() => go(r)}>${ico}${label}</button>`)}
+    <hr/>
+    <button class="navi" onClick=${() => { update(n => { n.user = null; n.route = 'login'; }); setDrawer(false); }}>${I.out}Sign out</button>
+    <button class="navi" onClick=${() => { const fresh = seed(); update(n => { Object.keys(n).forEach(k => delete n[k]); Object.assign(n, fresh); }); setDrawer(false); say('Demo data reset'); }}>${I.reset}Reset demo data</button>
+  </nav>`;
+}
+
+/* ---------- auth ---------- */
+function Login({ s, update, go }) {
+  const [email, setEmail] = useState('');
+  const [pw, setPw] = useState('');
+  const [show, setShow] = useState(false);
+  const [err, setErr] = useState('');
+  const enter = (role) => update(n => { n.user = { role }; n.route = role === 'school' ? 'schoolOverview' : (n.commute.accepted ? 'manage' : 'setup'); });
+  const submit = (e) => {
+    e.preventDefault();
+    const acc = s.accounts.find(a => a.email.toLowerCase() === email.trim().toLowerCase());
+    if (!acc || acc.password !== pw) { setErr('That email and password don’t match an account. Check them, or use a demo account below.'); return; }
+    enter(acc.role);
+  };
+  return html`<main class="screen" style="padding-top:28px">
+    <div class="logo-wrap"><${Logo} size="lg" /><span class="tagline">Safe, sustainable school commute</span></div>
+    <div class="hello"><h1>Sign in to SCATA</h1><p style="font-style:normal">New user? <button class="link" onClick=${() => go('register')}>Create an account</button></p></div>
+    <form class="form" onSubmit=${submit}>
+      <${Field} id="login-email" label="Email address" type="email" value=${email} onInput=${v => { setEmail(v); setErr(''); }} autocomplete="email" />
+      <div class="field">
+        <label for="login-pw">Password</label>
+        <input id="login-pw" type=${show ? 'text' : 'password'} value=${pw} onInput=${e => { setPw(e.target.value); setErr(''); }} autocomplete="current-password" style="padding-right:48px" />
+        <button type="button" class="iconbtn" aria-label=${show ? 'Hide password' : 'Show password'} onClick=${() => setShow(!show)} style="position:absolute;right:4px;top:4px">${I.eye}</button>
+        ${err ? html`<span class="err">${err}</span>` : ''}
+      </div>
+      <div style="text-align:right"><button type="button" class="link u" onClick=${() => setErr('Password reset emails arrive once Scata has a live server. For now use a demo account below.')}>Forgot password?</button></div>
+      <button class="btn" type="submit">Login</button>
+    </form>
+    <div class="or">OR TRY A DEMO ACCOUNT</div>
+    <button class="demo-btn" onClick=${() => enter('school')}><${Avatar} name="Dermot Connor" size="sm" /><span><b>School</b> Sign in as <b>Dermot Connor</b></span></button>
+    <button class="demo-btn" onClick=${() => enter('parent')}><${Avatar} name="Mark Kelly" size="sm" /><span><b>Parent</b> Sign in as <b>Mark Kelly</b></span></button>
+    <p class="demo-note">Demo accounts use password scata123. Everything you do is saved in this browser only.</p>
+  </main>`;
+}
+
+function Register({ s, update, go }) {
+  const [f, setF] = useState({ email: '', pw: '', pw2: '' });
+  const [tried, setTried] = useState(false);
+  const errs = {
+    email: !/^\S+@\S+\.\S+$/.test(f.email) ? 'Enter an email address like name@example.ie' : s.accounts.some(a => a.email.toLowerCase() === f.email.toLowerCase()) ? 'An account already uses this email. Sign in instead.' : '',
+    pw: f.pw.length < 8 ? 'Use at least 8 characters' : '',
+    pw2: f.pw2 !== f.pw ? 'The passwords don’t match' : '',
+  };
+  const ok = !errs.email && !errs.pw && !errs.pw2;
+  return html`<main class="screen" style="padding-top:20px">
+    <div class="row"><button class="iconbtn" aria-label="Back" onClick=${() => go('login')}>${I.back}</button></div>
+    <div class="logo-wrap"><${Logo} size="lg" /><span class="tagline">Safe, sustainable school commute</span></div>
+    <div class="hello"><h1>Safe, sustainable</h1><p style="font-style:normal">Already have an account? <button class="link" onClick=${() => go('login')}>Sign in</button></p></div>
+    <form class="form" onSubmit=${e => { e.preventDefault(); setTried(true); if (!ok) return; update(n => { n.pending = { email: f.email.trim(), password: f.pw }; n.route = 'choice'; }); }}>
+      <${Field} id="reg-email" label="Email address" type="email" value=${f.email} onInput=${v => setF({ ...f, email: v })} err=${tried && errs.email} autocomplete="email" />
+      <${Field} id="reg-pw" label="Password" type="password" value=${f.pw} onInput=${v => setF({ ...f, pw: v })} err=${tried && errs.pw} hint="At least 8 characters" autocomplete="new-password" />
+      <${Field} id="reg-pw2" label="Confirm password" type="password" value=${f.pw2} onInput=${v => setF({ ...f, pw2: v })} err=${tried && errs.pw2} autocomplete="new-password" />
+      <button class="btn" type="submit">Create account</button>
+    </form>
+    <p class="small muted center">By signing up you agree to the Scata terms of service and privacy policy.</p>
+  </main>`;
+}
+
+function Choice({ s, update, go }) {
+  const [pick, setPick] = useState('');
+  return html`<main class="screen" style="padding-top:20px">
+    <div class="row"><button class="iconbtn" aria-label="Back" onClick=${() => go('register')}>${I.back}</button></div>
+    <div class="logo-wrap"><${Logo} size="lg" /></div>
+    <div class="hello"><h1>Are you a…</h1><p style="font-style:normal">Schools sign up first and invite their parents.</p></div>
+    <div class="who-card">
+      <button class=${pick === 'school' ? 'on' : ''} aria-pressed=${pick === 'school'} onClick=${() => setPick('school')}>${I.school}School</button>
+      <button class=${pick === 'parent' ? 'on' : ''} aria-pressed=${pick === 'parent'} onClick=${() => setPick('parent')}>${I.parent}Parent</button>
+    </div>
+    <${Action} disabled=${!pick} onClick=${() => go(pick === 'school' ? 'schoolInfo' : 'parentInfo')}>Let’s Go!<//>
+  </main>`;
+}
+
+function SchoolInfo({ s, update, go }) {
+  const [f, setF] = useState({ first: '', last: '', eircode: '', name: '', students: '100-200', open: '08:30-09:30', close: '14:15-15:00' });
+  const [tried, setTried] = useState(false);
+  const set = (k) => (v) => setF({ ...f, [k]: v });
+  const eirOk = /^[A-Za-z]\d[\dWw]\s?[A-Za-z0-9]{4}$/.test(f.eircode.trim());
+  const ok = f.first && f.last && f.name && eirOk;
+  const submit = (e) => {
+    e.preventDefault(); setTried(true); if (!ok) return;
+    update(n => {
+      n.school = { ...f, eircode: f.eircode.toUpperCase().replace(/^(\w{3})\s?(\w{4})$/, '$1 $2'), code: 'sca' + String(Math.floor(Math.random() * 9000) + 1000) };
+      if (n.pending) { n.accounts.push({ ...n.pending, role: 'school' }); n.pending = null; }
+      n.user = { role: 'school' }; n.route = 'schoolOverview';
+    });
+  };
+  return html`<main class="screen" style="padding-top:20px">
+    <div class="row"><button class="iconbtn" aria-label="Back" onClick=${() => go('choice')}>${I.back}</button><div class="grow"><${Logo} /></div><span style="width:40px"></span></div>
+    <h2 class="title center">Fill in school information</h2>
+    <form class="form" onSubmit=${submit} id="school-form">
+      <div class="grid2">
+        <${Field} id="si-first" label="First name" value=${f.first} onInput=${set('first')} hint="What’s your name?" err=${tried && !f.first && 'Enter your first name'} />
+        <${Field} id="si-last" label="Surname" value=${f.last} onInput=${set('last')} hint="Your surname" err=${tried && !f.last && 'Enter your surname'} />
+      </div>
+      <${Field} id="si-eir" label="Eircode" value=${f.eircode} onInput=${set('eircode')} hint="The school’s Eircode, e.g. D12 TR83" err=${tried && !eirOk && 'Enter a 7-character Eircode, e.g. D12 TR83'} />
+      <${Field} id="si-name" label="School name" value=${f.name} onInput=${set('name')} hint="The name of the school" err=${tried && !f.name && 'Enter the school’s name'} />
+      <${Select} id="si-size" label="Number of students" value=${f.students} onInput=${set('students')} options=${['0-100', '100-200', '200-400', '400-800', '800+']} hint="How many students are in the school?" />
+      <div class="grid2">
+        <${Field} id="si-open" label="Opening time" value=${f.open} onInput=${set('open')} />
+        <${Field} id="si-close" label="Closing time" value=${f.close} onInput=${set('close')} />
+      </div>
+    </form>
+    <div class="action"><button class="btn" type="submit" form="school-form">Let’s Go!</button></div>
+  </main>`;
+}
+
+function ParentInfo({ s, update, go }) {
+  const [f, setF] = useState({ first: '', last: '', code: '', child: '', dob: '' });
+  const [tried, setTried] = useState(false);
+  const set = (k) => (v) => setF({ ...f, [k]: v });
+  const codeOk = f.code.trim().toLowerCase() === s.school.code;
+  const ok = f.first && f.last && codeOk && f.child && f.dob;
+  const submit = (e) => {
+    e.preventDefault(); setTried(true); if (!ok) return;
+    update(n => {
+      n.parent = { first: f.first, last: f.last, email: n.pending ? n.pending.email : '', plus: false, children: [{ id: uid(), name: f.child, dob: f.dob }] };
+      n.commute.accepted = false; n.rota = null;
+      if (n.pending) { n.accounts.push({ ...n.pending, role: 'parent' }); n.pending = null; }
+      n.user = { role: 'parent' }; n.route = 'setup';
+    });
+  };
+  return html`<main class="screen" style="padding-top:20px">
+    <div class="row"><button class="iconbtn" aria-label="Back" onClick=${() => go('choice')}>${I.back}</button><div class="grow"><${Logo} /></div><span style="width:40px"></span></div>
+    <h2 class="title center">Fill in your information</h2>
+    <form class="form" onSubmit=${submit} id="parent-form">
+      <div class="grid2">
+        <${Field} id="pi-first" label="First name" value=${f.first} onInput=${set('first')} err=${tried && !f.first && 'Enter your first name'} />
+        <${Field} id="pi-last" label="Surname" value=${f.last} onInput=${set('last')} err=${tried && !f.last && 'Enter your surname'} />
+      </div>
+      <${Field} id="pi-code" label="School code" value=${f.code} onInput=${set('code')} hint=${`From your school’s invite link. The demo school’s code is ${s.school.code}.`} err=${tried && !codeOk && `That code doesn’t match a school. The demo school’s code is ${s.school.code}.`} />
+      <h3>Your child</h3>
+      <div class="grid2">
+        <${Field} id="pi-child" label="Child’s first name" value=${f.child} onInput=${set('child')} err=${tried && !f.child && 'Enter a name'} />
+        <${Field} id="pi-dob" label="Date of birth" type="date" value=${f.dob} onInput=${set('dob')} err=${tried && !f.dob && 'Pick a date'} />
+      </div>
+      <p class="small muted">You can add more children later from your profile.</p>
+    </form>
+    <div class="action"><button class="btn" type="submit" form="parent-form">Let’s Go!</button></div>
+  </main>`;
+}
+
+/* ---------- school ---------- */
+function SchoolOverview({ s, go }) {
+  const fp = footprint(s.school.students);
+  return html`<main class="screen">
+    <div class="hello"><h1>Hi, ${s.school.first}!</h1></div>
+    <div class="stack" style="gap:8px">
+      <div class="row"><span style="width:22px;color:var(--ink-2)">${I.bank}</span><span>${s.school.name}</span></div>
+      <div class="row"><span style="width:22px;color:var(--ink-2)">${I.pin}</span><span>${s.school.eircode}</span></div>
+    </div>
+    <${SmartMap} s=${s} variant="catchment" label="Map of the area within 1 and 3 km of the school" />
+    <${MapLink} href=${gmPlace(s)}>Open the school in Google Maps<//>
+    <div class="card flat row" style="display:flex">${html`<span style="width:26px;flex:none">${I.info}</span>`}<span>On average the school commute for a school of ${s.school.students} students produces:</span></div>
+    <div class="card"><div class="stats">
+      <div>${I.car}<span class="big" style="font-size:18px">${fmt(fp.trips)}</span><span class="lbl">car trips per month</span></div>
+      <div>${I.co2}<span class="big" style="font-size:18px">${fmt(fp.co2)} kg</span><span class="lbl">of carbon</span></div>
+      <div>${I.jam}<span class="big" style="font-size:18px">Gate</span><span class="lbl">congestion</span></div>
+    </div></div>
+    <${Action} onClick=${() => go('invite')}>Let’s Go!<//>
+  </main>`;
+}
+
+function InviteParents({ s, update, go, say }) {
+  const link = `scata.ie/${s.school.code}`;
+  const [emails, setEmails] = useState('');
+  const [err, setErr] = useState('');
+  const copy = () => { navigator.clipboard.writeText('https://' + link).then(() => say('Link copied'), () => { const el = document.getElementById('invite-link'); const r = document.createRange(); r.selectNodeContents(el); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); say('Link selected. Copy it from here.'); }); };
+  const add = (e) => {
+    e.preventDefault();
+    const list = emails.split(/[\s,;]+/).filter(Boolean);
+    const bad = list.filter(x => !/^\S+@\S+\.\S+$/.test(x));
+    if (!list.length) { setErr('Enter at least one email address'); return; }
+    if (bad.length) { setErr(`Check ${bad.join(', ')}: that isn’t an email address`); return; }
+    update(n => list.forEach(email => { if (!n.parents.some(p => p.email === email)) n.parents.unshift({ id: uid(), name: email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), email, status: 'invited' }); }));
+    setEmails(''); setErr(''); say(`${list.length} invite${list.length > 1 ? 's' : ''} queued`);
+  };
+  const invited = s.parents.filter(p => p.status === 'invited').length;
+  return html`<main class="screen">
+    <div class="hello"><h1>Invite your parents</h1><p>${s.school.name}</p></div>
+    <div class="card">
+      <h3>Share your school link</h3>
+      <p class="muted" style="margin:0">Send this link to parents by email, text or your school app. Parents use it to join your school on Scata.</p>
+      <div class="copybox"><code id="invite-link">${link}</code><button class="btn green sm" onClick=${copy}>Copy</button></div>
+    </div>
+    <form class="card" onSubmit=${add}>
+      <h3>Or invite by email</h3>
+      <${Field} id="inv-emails" label="Parent emails" value=${emails} onInput=${v => { setEmails(v); setErr(''); }} hint="Separate several addresses with commas" err=${err} />
+      <button class="btn" type="submit">Send invites</button>
+      <p class="demo-note" style="margin:0">Demo: invites are added to your parents list, no email is sent yet.</p>
+    </form>
+    <div class="card flat row between" style="display:flex">
+      <span><b>${s.parents.length}</b> parents · <b>${invited}</b> waiting to join</span>
+      <button class="btn sm ghost" onClick=${() => go('schoolProfile')}>View list</button>
+    </div>
+  </main>`;
+}
+
+function ProfileHero({ name, line1, line2, tabs }) {
+  return html`<div class="profile-hero">
+    <div class="sky"><svg viewBox="0 0 400 60" preserveAspectRatio="none"><path d="M0 40 C60 10 120 10 180 34 S300 20 400 30 V60 H0Z" fill="var(--green)" fill-opacity=".35"/><path d="M0 50 C80 30 160 46 240 40 S340 34 400 46 V60 H0Z" fill="var(--green)" fill-opacity=".55"/></svg></div>
+    <div class="who"><${Avatar} name=${name} size="xl" /><b>${name}</b><span style="font-weight:600;color:var(--ink-2)">${line1}</span><span class="muted">${line2}</span></div>
+    ${tabs}
+  </div>`;
+}
+
+function SchoolProfile({ s, update, say }) {
+  const [tab, setTab] = useState('parents');
+  const [filter, setFilter] = useState('all');
+  const [q, setQ] = useState('');
+  const [page, setPage] = useState(0);
+  const [sel, setSel] = useState([]);
+  const [adding, setAdding] = useState(false);
+  const [np, setNp] = useState({ name: '', email: '' });
+  const per = 5;
+  const list = s.parents.filter(p => (filter === 'all' || p.status === 'active') && (p.name + p.email).toLowerCase().includes(q.toLowerCase()));
+  const pages = Math.max(1, Math.ceil(list.length / per));
+  const pg = Math.min(page, pages - 1);
+  const shown = list.slice(pg * per, pg * per + per);
+  const name = `${s.school.first} ${s.school.last}`;
+  const tabs = html`<div class="tabs"><button class=${'tab' + (tab === 'profile' ? ' on' : '')} onClick=${() => setTab('profile')}>${I.idcard}Profile</button><button class=${'tab' + (tab === 'parents' ? ' on' : '')} onClick=${() => setTab('parents')}>${I.heart}Parents</button></div>`;
+  return html`<main class="screen">
+    <div><h2 class="title">School Profile</h2><div class="crumbs"><b>Dashboard</b>•<span>${tab === 'parents' ? 'Parents' : 'Profile'}</span></div></div>
+    <${ProfileHero} name=${name} line1=${s.school.name} line2="School manager" tabs=${tabs} />
+    ${tab === 'profile' ? html`<div class="card">
+      ${[['Eircode', s.school.eircode], ['Students', s.school.students], ['Opening time', s.school.open], ['Closing time', s.school.close], ['School code', s.school.code]].map(([k, v]) => html`<div class="row between" style="display:flex"><span class="muted">${k}</span><b>${v}</b></div>`)}
+    </div>` : html`<div class="card">
+      <div><h3>Parents List</h3><p class="muted small" style="margin:4px 0 0">Manage and invite parents</p></div>
+      <div><button class="btn green" onClick=${() => setAdding(!adding)}>${I.plus}Add Parent</button></div>
+      ${adding ? html`<form class="form card flat" onSubmit=${e => { e.preventDefault(); if (!np.name || !/^\S+@\S+\.\S+$/.test(np.email)) { say('Enter a name and a valid email'); return; } update(n => n.parents.unshift({ id: uid(), ...np, status: 'invited' })); setNp({ name: '', email: '' }); setAdding(false); say(`${np.name} invited`); }}>
+        <${Field} id="np-name" label="Parent name" value=${np.name} onInput=${v => setNp({ ...np, name: v })} />
+        <${Field} id="np-email" label="Email" type="email" value=${np.email} onInput=${v => setNp({ ...np, email: v })} />
+        <button class="btn" type="submit">Invite parent</button>
+      </form>` : ''}
+      <div class="table">
+        <div class="tabs" style="padding:0 12px;background:var(--surface)"><button class=${'tab' + (filter === 'all' ? ' on' : '')} onClick=${() => { setFilter('all'); setPage(0); }}>All</button><button class=${'tab' + (filter === 'active' ? ' on' : '')} onClick=${() => { setFilter('active'); setPage(0); }}>Active</button></div>
+        <div class="search">${I.search}<input id="parent-search" placeholder="Search…" aria-label="Search parents" value=${q} onInput=${e => { setQ(e.target.value); setPage(0); }} /></div>
+        <div class="trow thead"><input type="checkbox" aria-label="Select all on this page" checked=${shown.length && shown.every(p => sel.includes(p.id))} onChange=${e => setSel(e.target.checked ? [...new Set([...sel, ...shown.map(p => p.id)])] : sel.filter(id => !shown.some(p => p.id === id)))} /><span>Name</span><span>Status</span></div>
+        ${shown.map(p => html`<div class="trow"><input type="checkbox" aria-label=${'Select ' + p.name} checked=${sel.includes(p.id)} onChange=${e => setSel(e.target.checked ? [...sel, p.id] : sel.filter(x => x !== p.id))} /><span class="row" style="gap:10px"><${Avatar} name=${p.name} size="sm" /><span style="min-width:0;overflow-wrap:anywhere">${p.email}</span></span><span class=${'status ' + (p.status === 'active' ? 'accepted' : 'pending')}>${p.status === 'active' ? 'Active' : 'Invited'}</span></div>`)}
+        ${!shown.length ? html`<div class="trow"><span></span><span class="muted">No parents match “${q}”.</span><span></span></div>` : ''}
+        <div class="tfoot">
+          ${sel.length ? html`<button class="pill out" onClick=${() => { update(n => { n.parents = n.parents.filter(p => !sel.includes(p.id)); }); say(`Removed ${sel.length} parent${sel.length > 1 ? 's' : ''}`); setSel([]); }}>Remove ${sel.length}</button>` : ''}
+          <span>${list.length ? `${pg * per + 1}-${Math.min(list.length, pg * per + per)} of ${list.length}` : '0 of 0'}</span>
+          <button class="iconbtn" style="width:32px;height:32px" aria-label="Previous page" disabled=${pg === 0} onClick=${() => setPage(pg - 1)}>${I.chevL}</button>
+          <button class="iconbtn" style="width:32px;height:32px" aria-label="Next page" disabled=${pg >= pages - 1} onClick=${() => setPage(pg + 1)}>${I.chevR}</button>
+        </div>
+      </div>
+    </div>`}
+  </main>`;
+}
+
+function Reports({ s }) {
+  const active = s.parents.filter(p => p.status === 'active').length;
+  return html`<main class="screen">
+    <div><h2 class="title">School Reports</h2><div class="crumbs"><b>Dashboard</b>•<span>Reports</span></div></div>
+    <div class="card"><${Stats} s=${{ eur: active * 910, co2: active * 228, hrs: active * 10 }} labels=${['saved this year', 'saved this year', 'saved this year']} /><p class="small muted center" style="margin:0">${active} active families sharing the commute</p></div>
+    <div class="card">
+      <div><h3>Saved statistics</h3><p class="muted small" style="margin:2px 0 0">(+43%) than last year</p></div>
+      <div class="legend"><span><i style="background:var(--green)"></i>CO₂</span><span><i style="background:var(--amber)"></i>Euro</span><span><i style="background:var(--blue)"></i>Time</span></div>
+      <${ReportChart} />
+    </div>
+    <div class="card">
+      <h3>Trips by commute type</h3>
+      <${Pie} data=${[{ v: 40, c: 'var(--green)' }, { v: 15, c: 'var(--amber)' }, { v: 35, c: 'var(--blue)' }, { v: 10, c: 'var(--red)' }]} />
+      <div class="legend"><span><i style="background:var(--green)"></i>Car</span><span><i style="background:var(--amber)"></i>Bike</span><span><i style="background:var(--blue)"></i>Public</span><span><i style="background:var(--red)"></i>Walk</span></div>
+    </div>
+    <p class="demo-note">Charts show example figures until real trips are logged.</p>
+  </main>`;
+}
+
+/* ---------- parent ---------- */
+function Hello({ s }) { return html`<div class="hello"><h1>Hi, ${s.parent.first}!</h1><p>${s.school.name}</p></div>`; }
+
+function Setup({ s, update, go }) {
+  const c = s.commute;
+  const set = (k, v) => update(n => { n.commute[k] = v; });
+  return html`<main class="screen">
+    <${Hello} s=${s} />
+    <div class="card" style="gap:18px">
+      <h3 class="center">Before we reach out, we need to know a little bit more about your commute</h3>
+      <div class="stack"><span class="center">How do you plan on sharing your commute?</span>
+        <div class="choice">${['walk', 'bike', 'car', 'bus'].map(m => html`<div><button class=${'mode' + (c.mode === m ? ' on' : '')} aria-pressed=${c.mode === m} aria-label=${MODE_NAME[m]} onClick=${() => set('mode', m)}>${MODE_ICON[m]}</button><div class="choice-label">${{ walk: 'Walk', bike: 'Cycle', car: 'Car', bus: 'Bus' }[m]}</div></div>`)}</div>
+      </div>
+      <div class="stack"><span class="center">How many children can you add to your commute?</span>
+        <div class="choice">${[1, 2, 3, 4].map(k => html`<button class=${'seat' + (c.seats === k ? ' on' : '')} aria-pressed=${c.seats === k} aria-label=${k + ' children'} onClick=${() => set('seats', k)}>${k}</button>`)}</div>
+      </div>
+      <div class="stack" style="gap:18px"><span class="center">What time is the drop off and pick up?</span>
+        <${Field} id="su-home" label="Home Eircode or address" value=${c.home || ''} onInput=${v => set('home', v)} hint="Used to plan your route to school in Google Maps" />
+        <${Field} id="su-drop" label="Drop off time" value=${c.drop} onInput=${v => set('drop', v)} />
+        <${Field} id="su-pick" label="Pick up time" value=${c.pick} onInput=${v => set('pick', v)} />
+      </div>
+    </div>
+    <${Action} onClick=${() => go('match')}>Let’s Go!<//>
+  </main>`;
+}
+
+function Match({ s, update, go }) {
+  const [mode, setMode] = useState(s.commute.mode);
+  const [info, setInfo] = useState(null);
+  const nearby = s.families.reduce((a, f) => a + f.kids, 0);
+  const sv = savings(mode, Math.min(s.commute.seats, s.families.length) + 1);
+  return html`<main class="screen">
+    <${Hello} s=${s} />
+    <div class="map-wrap"><${SmartMap} s=${s} variant="route" mode=${mode} onInfo=${setInfo} /><div class="km">${info ? info.km : 10}<small>km</small></div></div>
+    <${MapLink} href=${gmDirections(s, mode)}>See your ${{ walk: 'walking', bike: 'cycling', car: 'driving', bus: 'bus' }[mode]} route in Google Maps<//>
+    <div class="card tint center" style="gap:14px">
+      <p style="margin:0;font-size:16px">There are <b>${nearby}</b> children within 5 min of your location travelling to your school every day.</p>
+      <p style="margin:0"><b>${MODE_NAME[mode]}</b> together could save you up to</p>
+      <div class="choice">${['walk', 'bike', 'car', 'bus'].map(m => html`<button class=${'mode' + (mode === m ? ' on' : '')} aria-pressed=${mode === m} aria-label=${MODE_NAME[m]} onClick=${() => setMode(m)}>${MODE_ICON[m]}</button>`)}</div>
+      <${Stats} s=${sv} labels=${['a year', 'CO₂ a year', 'a year']} />
+      <p class="demo-note" style="margin:0">Estimate: 10 km round trip, 183 school days.</p>
+    </div>
+    <${Action} onClick=${() => { update(n => { n.commute.mode = mode; }); go('terms'); }}>Let’s Go!<//>
+  </main>`;
+}
+
+function Terms({ s, update, go }) {
+  const [ok, setOk] = useState(s.commute.accepted);
+  const car = s.commute.mode === 'car';
+  const items = [
+    [I.parent, 'You will always travel with your child.'],
+    ...(car ? [[I.car, 'You confirm that your car is fit for purpose.'], [I.shield, 'You confirm that your vehicle is insured, and you have a full driving licence.']] : [[I.shield, 'You confirm that you will supervise the children in your group for the whole journey.']]),
+    [I.heart, `By ticking below you agree that you are electing to ${car ? 'carpool' : 'share the commute'} with other parents.`],
+  ];
+  return html`<main class="screen">
+    <${Hello} s=${s} />
+    <div class="card" style="gap:18px">
+      <h3 class="center">Safety is our Priority</h3>
+      ${items.map(([ico, t]) => html`<div class="feature" style="gap:14px"><span style="width:36px;height:36px;border-radius:50%;background:var(--blue-soft);color:var(--blue);display:grid;place-items:center;flex:none">${ico}</span><span>${t}</span></div>`)}
+    </div>
+    <label class="check" for="terms-ok"><input id="terms-ok" type="checkbox" checked=${ok} onChange=${e => setOk(e.target.checked)} />Please accept to build this commute</label>
+    <${Action} disabled=${!ok} onClick=${() => { update(n => { n.commute.accepted = true; }); go('manage'); }}>Let’s Go!<//>
+  </main>`;
+}
+
+function Manage({ s, update, go, say }) {
+  const accepted = s.families.filter(f => f.status === 'accepted');
+  const kidsIn = accepted.reduce((a, f) => a + f.kids, 0);
+  const capacity = s.commute.seats + 1;
+  const used = Math.min(capacity, kidsIn + 1);
+  const left = Math.max(0, capacity - used);
+  const sv = savings(s.commute.mode, accepted.length + 1);
+  const invite = (f) => {
+    update(n => { const x = n.families.find(y => y.id === f.id); x.status = 'pending'; n.events.push({ at: Date.now() + 4000 + Math.random() * 3000, type: 'invite', fam: f.id }); });
+    say(`Invite sent to ${f.name}`);
+  };
+  return html`<main class="screen">
+    <${Hello} s=${s} />
+    <div class="card center">
+      <h3>Invite parents in your area</h3>
+      <span class="muted small">Trip capacity: <b>${used}/${capacity}</b></span>
+      <span class="muted small">${left ? `You can add ${left} more ${left === 1 ? 'child' : 'children'}` : 'Your commute is full'}</span>
+    </div>
+    ${s.families.map(f => html`<div class="person">
+      <${Avatar} name=${f.name} />
+      <div class="grow"><b>${f.name}</b><div class="muted small">${f.kids} ${f.kids === 1 ? 'child' : 'children'} · ${f.mins} min away</div></div>
+      ${f.status === 'none' ? html`<button class="btn sm ghost" onClick=${() => invite(f)}>Invite</button>`
+        : html`<span class=${'status ' + f.status}>${f.status === 'accepted' ? '✓ Accepted' : f.status === 'pending' ? 'Pending' : 'Declined'}</span>`}
+    </div>`)}
+    <div class="center stack" style="gap:4px"><h3>Build this commute?</h3><span class="muted">Sharing this commute with ${accepted.length} ${accepted.length === 1 ? 'family' : 'families'} could save you each year:</span></div>
+    <div class="card"><${Stats} s=${sv} /></div>
+    <${Action} disabled=${!accepted.length} onClick=${() => { update(n => { n.rota = buildRota(n); n.weekOffset = 0; }); go('calendar'); }}>${s.rota ? 'Rebuild rota' : 'Let’s Go!'}<//>
+  </main>`;
+}
+
+function mondayOf(offset) {
+  const d = new Date(); d.setHours(12, 0, 0, 0);
+  const day = d.getDay(); const diff = day === 0 ? 1 : day === 6 ? 2 : 1 - day;
+  d.setDate(d.getDate() + diff + offset * 7); return d;
+}
+function weekNo(d) { const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); const n = t.getUTCDay() || 7; t.setUTCDate(t.getUTCDate() + 4 - n); const y = new Date(Date.UTC(t.getUTCFullYear(), 0, 1)); return Math.ceil(((t - y) / 864e5 + 1) / 7); }
+
+function Calendar({ s, update, go, say }) {
+  const [swapFrom, setSwapFrom] = useState(null);
+  if (!s.rota) return html`<main class="screen"><${Hello} s=${s} /><div class="card note"><h3>No rota yet</h3><p style="margin:0">Invite at least one family and build your commute to get a rota.</p></div><${Action} onClick=${() => go('manage')}>Invite families<//></main>`;
+  const fam = (id) => id === 'me' ? { name: 'You' } : s.families.find(f => f.id === id) || { name: '?' };
+  const members = 1 + s.families.filter(f => f.status === 'accepted').length;
+  const mon = mondayOf(s.weekOffset);
+  const dayDate = (i) => { const d = new Date(mon); d.setDate(d.getDate() + i); return d; };
+  const times = { drop: s.commute.drop, pick: s.commute.pick };
+  const per = (10 / members);
+  const label = (slot) => `${DAYS[slot.day]} ${slot.kind === 'drop' ? 'drop-off' : 'pick-up'}`;
+  const tapSlot = (slot) => {
+    if (!swapFrom) return;
+    if (slot.id === swapFrom) { setSwapFrom(null); return; }
+    const a = s.rota.find(x => x.id === swapFrom);
+    if (slot.who === 'me') { say('Pick a slot that another parent is doing'); return; }
+    const other = slot.who;
+    update(n => { const A = n.rota.find(x => x.id === a.id), B = n.rota.find(x => x.id === slot.id); A.who = other; B.who = 'me'; A.confirmed = false; B.confirmed = false; n.events.push({ at: Date.now() + 3500, type: 'swap', fam: other, slot: B.id, label: label(B) }); n.events.push({ at: Date.now() + 3600, type: 'update', fam: other, slot: A.id, label: label(A) }); });
+    setSwapFrom(null); say(`Swap request sent to ${fam(other).name}`);
+  };
+  return html`<main class="screen">
+    <div class="card note"><h3>Trip overview</h3><p style="margin:0">${members} families, 5 days: that’s ${per % 1 ? per.toFixed(1) : per} trips each!</p></div>
+    ${swapFrom ? html`<div class="card flat" style="background:var(--surface)"><span><b>Swapping ${label(s.rota.find(x => x.id === swapFrom))}.</b> Tap the slot you’d like instead.</span><button class="btn sm ghost" onClick=${() => setSwapFrom(null)}>Cancel swap</button></div>` : ''}
+    <div class="card" style="padding:0;gap:0;overflow:hidden">
+      <div style="padding:14px 16px"><h3>Calendar</h3></div>
+      <div class="cal-nav" style="padding:6px 8px 12px">
+        <button class="iconbtn" aria-label="Previous week" onClick=${() => update(n => { n.weekOffset--; })}>${I.chevL}</button>
+        <span>${mon.toLocaleDateString('en-IE', { month: 'long', year: 'numeric' })}, Week ${weekNo(mon)}</span>
+        <button class="iconbtn" aria-label="Next week" onClick=${() => update(n => { n.weekOffset++; })}>${I.chevR}</button>
+      </div>
+      ${DAYS.map((d, i) => html`<div class="cal-day">
+        <div class="cal-head"><span>${d}</span><span>${dayDate(i).toLocaleDateString('en-IE', { month: 'long', day: 'numeric', year: 'numeric' })}</span></div>
+        ${s.rota.filter(x => x.day === i).map(slot => { const mine = slot.who === 'me';
+          return html`<div class=${'cal-slot' + (mine ? ' mine' : '') + (swapFrom && !mine ? ' picking' : '')} onClick=${() => tapSlot(slot)}>
+            <div class="cal-who"><span class="small" style="min-width:92px">${times[slot.kind]}</span><span class=${'dot' + (slot.confirmed ? '' : ' amber')}></span><span>${fam(slot.who).name}</span></div>
+            <div class="row" style="gap:6px">${mine ? html`
+              ${slot.confirmed ? html`<span class="status accepted small">Confirmed</span>` : html`<button class="pill" onClick=${e => { e.stopPropagation(); update(n => { n.rota.find(x => x.id === slot.id).confirmed = true; }); say('Slot confirmed'); }}>Confirm</button>`}
+              <button class="pill violet" onClick=${e => { e.stopPropagation(); setSwapFrom(slot.id); }}>Swap</button>`
+              : !slot.confirmed ? html`<button class="pill out" onClick=${e => { e.stopPropagation(); if (swapFrom) { tapSlot(slot); return; } update(n => { n.events.push({ at: Date.now() + 3000, type: 'update', fam: slot.who, slot: slot.id, label: label(slot) }); }); say(`Asked ${fam(slot.who).name} to confirm`); }}>Request update</button>` : ''}</div>
+          </div>`; })}
+      </div>`)}
+    </div>
+    <div class="card note">
+      <p style="margin:0">We have generated a <b>random allocation</b>. As there isn’t always an even number of trips, we will propose a new allocation in 4 weeks.</p>
+      <p style="margin:0">Tap <b>Confirm</b> on your slot. If a slot doesn’t work for you, tap <b>Swap</b> and pick another parent’s slot. Once they agree, both slots are confirmed.</p>
+      <div class="row" style="justify-content:center;gap:16px;font-size:13px"><span class="row" style="gap:6px"><span class="dot"></span>Confirmed</span><span class="row" style="gap:6px"><span class="dot amber"></span>Waiting</span></div>
+    </div>
+    <${Action} onClick=${() => go('trip')}>Let’s Go!<//>
+  </main>`;
+}
+
+function nextTrip(s) {
+  if (!s.rota) return null;
+  const now = new Date(); let day = now.getDay() - 1; // 0 = Monday
+  let kind = now.getHours() < 9 ? 'drop' : now.getHours() < 14 ? 'pick' : 'drop';
+  if (now.getHours() >= 14) day += 1;
+  if (day < 0 || day > 4) { day = 0; kind = 'drop'; }
+  return s.rota.find(x => x.day === day && x.kind === kind);
+}
+
+function NextTrip({ s, go }) {
+  const [info, setInfo] = useState(null);
+  const slot = nextTrip(s);
+  if (!slot) return html`<main class="screen"><${Hello} s=${s} /><div class="card note"><h3>No trips yet</h3><p style="margin:0">Build your commute to see your next school trip.</p></div><${Action} onClick=${() => go('manage')}>Build my commute<//></main>`;
+  const mine = slot.who === 'me';
+  const f = mine ? null : s.families.find(x => x.id === slot.who);
+  const t = slot.kind === 'drop' ? s.commute.drop.split('-')[0] : s.commute.pick.split('-')[0];
+  return html`<main class="screen">
+    <${Hello} s=${s} />
+    <div class="card note">
+      <h3>Next School Trip</h3>
+      <p style="margin:0">${mine ? html`You’re doing <b>${slot.kind === 'drop' ? 'drop-off' : 'pick-up'}</b> on ${DAYS[slot.day]}. Leave at <b>${t}</b>.` : html`<b>${f.name}</b> is doing ${slot.kind === 'drop' ? 'drop-off' : 'pick-up'} on ${DAYS[slot.day]} at <b>${t}</b>.`}</p>
+    </div>
+    <${SmartMap} s=${s} variant="trip" onInfo=${setInfo} />
+    <${MapLink} href=${gmDirections(s)}>Get directions in Google Maps<//>
+    <div class="card">
+      <div class="row between" style="display:flex"><span class="muted">Children travelling</span><b>${1 + s.families.filter(x => x.status === 'accepted').reduce((a, x) => a + x.kids, 0)}</b></div>
+      <div class="row between" style="display:flex"><span class="muted">Journey</span><b>${info ? `${info.km} km · about ${info.mins} min` : '10 km · about 21 min'}</b></div>
+    </div>
+    <${Action} onClick=${() => go(s.parent.plus ? 'live' : 'plus')}>${s.parent.plus ? 'Live tracking' : 'Track it live with Scata Plus'}<//>
+  </main>`;
+}
+
+function Plus({ s, update, go, say }) {
+  const on = s.parent.plus;
+  return html`<main class="screen">
+    <div class="hello"><h1>Scata Plus ⚡</h1><p>Extra peace of mind on every trip</p></div>
+    <div class="card plus-card" style="gap:16px">
+      ${[['Live tracking', 'See the car on the map and how far away it is.'], ['In-commute chat', 'Message the parent doing the run without swapping numbers.'], ['Pick-up and arrival alerts', 'Get told the moment your child is collected and arrives at school.']].map(([a, b]) => html`<div class="feature">${I.check}<div><b>${a}</b><div class="muted">${b}</div></div></div>`)}
+      <div class="center"><span style="font-size:30px;font-weight:800">€5.99</span><span class="muted"> / month</span></div>
+    </div>
+    <p class="demo-note">Demo: no payment is taken. You can turn Plus off again at any time.</p>
+    <${Action} onClick=${() => { update(n => { n.parent.plus = !on; }); say(on ? 'Scata Plus turned off' : 'Welcome to Scata Plus'); if (!on) go('live'); }}>${on ? 'Turn off Scata Plus' : 'Start Scata Plus'}<//>
+  </main>`;
+}
+
+function Live({ s, update, go, say }) {
+  const [tab, setTab] = useState('track');
+  const [p, setP] = useState(0);
+  const [info, setInfo] = useState(null);
+  const slot = nextTrip(s);
+  const driverId = slot && slot.who !== 'me' ? slot.who : (s.families.find(f => f.status === 'accepted') || {}).id;
+  const driver = s.families.find(f => f.id === driverId);
+  const [chatWith, setChatWith] = useState(driverId);
+  useEffect(() => {
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const t = setInterval(() => setP(v => (v >= 1 ? 0 : Math.min(1, v + (reduce ? .05 : .005)))), reduce ? 2000 : 200);
+    return () => clearInterval(t);
+  }, []);
+  if (!s.parent.plus) return html`<${Plus} s=${s} update=${update} go=${go} say=${say} />`;
+  if (!driver) return html`<main class="screen"><div class="card note"><h3>No one to track yet</h3><p style="margin:0">Once a family accepts your invite, you can follow their trips here.</p></div><${Action} onClick=${() => go('manage')}>Invite families<//></main>`;
+  const mins = Math.max(0, Math.round((info ? info.mins : 10) * (1 - p)));
+  const tabs = html`<div class="tabs" style="justify-content:center"><button class=${'tab' + (tab === 'track' ? ' on' : '')} onClick=${() => setTab('track')}>${I.idcard}Live tracking</button><button class=${'tab' + (tab === 'chat' ? ' on' : '')} onClick=${() => setTab('chat')}>${I.heart}In-Commute chat</button></div>`;
+  if (tab === 'chat') return html`<main class="screen">${tabs}<${Chat} s=${s} update=${update} fam=${chatWith} setFam=${setChatWith} /><${Action} onClick=${() => go('commutes')}>Go back to commutes<//></main>`;
+  const first = driver.name.split(' ')[0];
+  return html`<main class="screen">
+    ${tabs}
+    <div class="card note"><h3>Next School Trip</h3><p style="margin:0">${mins > 0 ? `${first} is on the way and ${mins} min away. Please get ready!` : `${first} has arrived at school. Everyone is safely in.`}</p></div>
+    <${SmartMap} s=${s} variant="live" mode="car" progress=${p} onInfo=${setInfo} label=${`Live map showing ${first}'s car on the route to school`} />
+    <div class="sharing"><span class="pulse"></span>Sharing location</div>
+    <${MapLink} href=${gmDirections(s, 'car')}>Open this route in Google Maps<//>
+    <${Action} onClick=${() => setTab('chat')}>Chat!<//>
+  </main>`;
+}
+
+function Chat({ s, update, fam, setFam }) {
+  const [text, setText] = useState('');
+  const box = useRef();
+  const f = s.families.find(x => x.id === fam);
+  const msgs = s.chats[fam] || [];
+  const accepted = s.families.filter(x => x.status === 'accepted');
+  useEffect(() => { if (box.current) box.current.scrollTop = box.current.scrollHeight; }, [msgs.length]);
+  const send = (e) => {
+    e.preventDefault(); const t = text.trim(); if (!t) return;
+    const replies = ['Perfect, thanks!', 'Grand, see you then.', 'No problem at all 👍', 'Thanks for letting me know!'];
+    update(n => { (n.chats[fam] = n.chats[fam] || []).push({ me: true, text: t, t: clock(new Date()) }); n.events.push({ at: Date.now() + 2500, type: 'reply', fam, text: replies[Math.floor(Math.random() * replies.length)] }); });
+    setText('');
+  };
+  if (!f) return '';
+  return html`<div class="card" style="padding:0;gap:0">
+    <div class="row" style="padding:14px 16px;border-bottom:1px solid var(--line)">
+      <${Avatar} name=${f.name} />
+      <div class="grow"><b>${f.name}</b><div class="small" style="color:var(--green)">Active now</div></div>
+      ${accepted.length > 1 ? html`<select aria-label="Choose chat" value=${fam} onChange=${e => setFam(e.target.value)} style="border:1px solid var(--line);border-radius:8px;padding:6px;background:var(--bg)">${accepted.map(a => html`<option value=${a.id} selected=${a.id === fam}>${a.name.split(' ')[0]}</option>`)}</select>` : ''}
+    </div>
+    <div ref=${box} class="stack" style="padding:16px;max-height:52vh;overflow-y:auto">
+      ${!msgs.length ? html`<p class="muted center">Say hello to ${f.name.split(' ')[0]}.</p>` : ''}
+      ${msgs.map(m => html`<div class=${'bubble-row' + (m.me ? ' me' : '')}><span class="small muted">${m.t}</span><div class="bubble">${m.text}</div></div>`)}
+    </div>
+    <form class="chat-input" style="padding:12px;border-top:1px solid var(--line)" onSubmit=${send}><input id="chat-text" placeholder="Write a message…" aria-label="Message" value=${text} onInput=${e => setText(e.target.value)} /><button class="btn sm" type="submit">Send</button></form>
+  </div>`;
+}
+
+function ParentProfile({ s, update, go, say }) {
+  const [tab, setTab] = useState('profile');
+  const [q, setQ] = useState('');
+  const name = `${s.parent.first} ${s.parent.last}`;
+  const accepted = s.families.filter(f => f.status === 'accepted').length;
+  const kids = s.parent.children.filter(c => c.name.toLowerCase().includes(q.toLowerCase()));
+  const tabs = html`<div class="tabs"><button class=${'tab' + (tab === 'profile' ? ' on' : '')} onClick=${() => setTab('profile')}>${I.idcard}Profile</button><button class="tab" onClick=${() => go('manage')}>${I.heart}Manage commute</button></div>`;
+  return html`<main class="screen">
+    <div><h2 class="title">Parent profile</h2><div class="crumbs"><b>Dashboard</b>•<span>Profile</span></div></div>
+    <${ProfileHero} name=${name} line1=${s.school.name} line2=${s.parent.plus ? 'Parent · Scata Plus' : 'Parent'} tabs=${tabs} />
+    <div class="card"><${Stats} s=${savings(s.commute.mode, accepted + 1)} labels=${['saved a year', 'saved a year', 'saved a year']} /></div>
+    <div class="stack">
+      <div><h3>Children</h3><p class="muted small" style="margin:4px 0 0">Add and manage children</p></div>
+      <div><button class="btn green" onClick=${() => go('newChild')}>${I.plus}Add child</button></div>
+      <div class="table">
+        <div class="search">${I.search}<input id="child-search" placeholder="Search…" aria-label="Search children" value=${q} onInput=${e => setQ(e.target.value)} /></div>
+        <div class="trow thead" style="grid-template-columns:1fr auto 40px"><span>Name</span><span>Date of birth</span><span></span></div>
+        ${kids.map(c => html`<div class="trow" style="grid-template-columns:1fr auto 40px"><span class="row" style="gap:10px"><${Avatar} name=${c.name} size="sm" />${c.name}</span><span style="font-variant-numeric:tabular-nums">${new Date(c.dob).toLocaleDateString('en-IE')}</span><button class="iconbtn" style="width:32px;height:32px" aria-label=${'Remove ' + c.name} onClick=${() => { update(n => { n.parent.children = n.parent.children.filter(x => x.id !== c.id); }); say(`${c.name} removed`); }}>✕</button></div>`)}
+        <div class="tfoot"><span>${kids.length} of ${s.parent.children.length}</span></div>
+      </div>
+    </div>
+  </main>`;
+}
+
+function NewChild({ update, go, say }) {
+  const [f, setF] = useState({ name: '', dob: '', school: '' });
+  const [tried, setTried] = useState(false);
+  return html`<main class="screen">
+    <div><h2 class="title">New child</h2><div class="crumbs"><b>Profile</b>•<span>Add child</span></div></div>
+    <form class="card form" id="child-form" onSubmit=${e => { e.preventDefault(); setTried(true); if (!f.name || !f.dob) return; update(n => { n.parent.children.push({ id: uid(), name: f.name, dob: f.dob }); }); say(`${f.name} added`); go('profile'); }}>
+      <${Field} id="nc-name" label="First name" value=${f.name} onInput=${v => setF({ ...f, name: v })} err=${tried && !f.name && 'Enter a name'} />
+      <${Field} id="nc-dob" label="Date of birth" type="date" value=${f.dob} onInput=${v => setF({ ...f, dob: v })} err=${tried && !f.dob && 'Pick a date'} />
+      <p class="small muted" style="margin:0">Children can view the app but can’t make changes. Photo ID can be added once Scata goes live.</p>
+    </form>
+    <div class="action"><button class="btn" type="submit" form="child-form">Add child</button></div>
+  </main>`;
+}
+
+function Commutes({ s, go }) {
+  const accepted = s.families.filter(f => f.status === 'accepted');
+  const mine = s.rota ? s.rota.filter(x => x.who === 'me').length : 0;
+  return html`<main class="screen">
+    <div><h2 class="title">Commutes</h2><div class="crumbs"><b>Dashboard</b>•<span>Commutes</span></div></div>
+    <div class="card">
+      <div class="row"><span class="mode on" style="width:48px;height:48px;cursor:default">${MODE_ICON[s.commute.mode]}</span><div class="grow"><b>School run · ${s.school.name}</b><div class="muted small">${MODE_NAME[s.commute.mode]} · drop-off ${s.commute.drop} · pick-up ${s.commute.pick}</div></div></div>
+      <div class="row between" style="display:flex"><span class="muted">Families sharing</span><b>${accepted.length + 1}</b></div>
+      <div class="row between" style="display:flex"><span class="muted">Your trips this week</span><b>${mine} of 10</b></div>
+      <div class="row" style="flex-wrap:wrap;gap:8px">${accepted.map(f => html`<span class="row" style="gap:6px;background:var(--surface);border-radius:20px;padding:4px 10px 4px 4px"><${Avatar} name=${f.name} size="sm" /><span class="small">${f.name}</span></span>`)}</div>
+      <div class="row" style="gap:8px"><button class="btn sm ghost" onClick=${() => go('calendar')}>Calendar</button><button class="btn sm ghost" onClick=${() => go('manage')}>Manage</button><button class="btn sm ghost" onClick=${() => go('setup')}>Edit</button></div>
+    </div>
+    <button class="btn ghost" onClick=${() => go('setup')}>${'+ Set up another commute'}</button>
+  </main>`;
+}
+
+function Notifications({ s, update, go }) {
+  useEffect(() => { const t = setTimeout(() => update(n => n.notifications.forEach(x => { x.read = true; })), 1500); return () => clearTimeout(t); }, []);
+  const ago = (at) => { const m = Math.round((Date.now() - at) / 60000); return m < 1 ? 'Just now' : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`; };
+  const slot = nextTrip(s);
+  const tripLine = slot ? (slot.who === 'me' ? `You’re doing ${slot.kind === 'drop' ? 'drop-off' : 'pick-up'} on ${DAYS[slot.day]}. Leave at ${(slot.kind === 'drop' ? s.commute.drop : s.commute.pick).split('-')[0]}.` : `${(s.families.find(f => f.id === slot.who) || {}).name} is doing ${slot.kind === 'drop' ? 'drop-off' : 'pick-up'} on ${DAYS[slot.day]}.`) : null;
+  return html`<main class="screen">
+    <div><h2 class="title">Notifications</h2><div class="crumbs"><b>Dashboard</b>•<span>Notifications</span></div></div>
+    ${tripLine ? html`<button class="notif" style="background:var(--amber-soft);border:0;text-align:left" onClick=${() => go('trip')}><span class="ico">${I.route}</span><span><b>Next trip</b><div>${tripLine}</div></span></button>` : ''}
+    <div class="stack" style="gap:4px">${s.notifications.map(n => html`<div class=${'notif' + (n.read ? '' : ' unread')}><span class="ico">${n.kind === 'cal' ? I.cal : I.mail}</span><div class="grow"><div>${n.text}</div><div class="small muted">${ago(n.at)}</div></div></div>`)}</div>
+    ${!s.notifications.length ? html`<p class="muted center">You’re all caught up.</p>` : ''}
+  </main>`;
+}
+
+render(html`<${App} />`, document.getElementById('app'));
+</script>
+
+</body>
+</html>
