@@ -462,16 +462,27 @@ function loadMaps() {
   return mapsPromise;
 }
 const GM_TRAVEL = { walk: 'WALKING', bike: 'BICYCLING', car: 'DRIVING', bus: 'TRANSIT' };
+const num = (v) => (typeof v === 'function' ? v() : v);
+const toLL = (p) => ({ lat: num(p.lat), lng: num(p.lng) });
+// Path points are plain {lat, lng} numbers.
 function pointAlong(path, t) {
   if (!path.length) return null;
   const seg = []; let total = 0;
-  for (let i = 1; i < path.length; i++) { const d = Math.hypot(path[i].lat() - path[i - 1].lat(), path[i].lng() - path[i - 1].lng()); seg.push(d); total += d; }
+  for (let i = 1; i < path.length; i++) { const d = Math.hypot(path[i].lat - path[i - 1].lat, path[i].lng - path[i - 1].lng); seg.push(d); total += d; }
   let target = t * total;
   for (let i = 0; i < seg.length; i++) {
-    if (target <= seg[i] && seg[i] > 0) { const k = target / seg[i]; return { lat: path[i].lat() + (path[i + 1].lat() - path[i].lat()) * k, lng: path[i].lng() + (path[i + 1].lng() - path[i].lng()) * k }; }
+    if (target <= seg[i] && seg[i] > 0) { const k = target / seg[i]; return { lat: path[i].lat + (path[i + 1].lat - path[i].lat) * k, lng: path[i].lng + (path[i + 1].lng - path[i].lng) * k }; }
     target -= seg[i];
   }
-  const last = path[path.length - 1]; return { lat: last.lat(), lng: last.lng() };
+  return path[path.length - 1];
+}
+// Routes API (the Directions API is closed to new Google Cloud projects).
+async function computeRoute(gm, origin, destination, travel) {
+  const { Route } = await gm.importLibrary('routes');
+  const { routes } = await Route.computeRoutes({ origin, destination, travelMode: GM_TRAVEL[travel], region: 'IE', fields: ['path', 'distanceMeters', 'durationMillis'] });
+  const r = routes && routes[0];
+  if (!r || !r.path || !r.path.length) throw new Error('no route');
+  return { path: r.path.map(toLL), meters: r.distanceMeters || 0, mins: Math.round((r.durationMillis || 0) / 60000) };
 }
 function GoogleMap({ s, variant, mode, progress = 0, onInfo, onFail, label }) {
   const el = useRef(), map = useRef(), car = useRef(), path = useRef([]), extras = useRef([]);
@@ -499,22 +510,22 @@ function GoogleMap({ s, variant, mode, progress = 0, onInfo, onFail, label }) {
         });
         return;
       }
-      const renderer = add(new gm.DirectionsRenderer({ map: map.current, suppressMarkers: false, preserveViewport: false, polylineOptions: { strokeColor: '#2c5cf0', strokeWeight: 5 } }));
-      new gm.DirectionsService().route({ origin, destination: dest, travelMode: gm.TravelMode[GM_TRAVEL[travel]], region: 'ie' }, (res, status) => {
+      computeRoute(gm, origin, dest, travel).then(r => {
         if (dead) return;
-        if (status !== 'OK') { onFail && onFail(); return; }
-        renderer.setDirections(res);
-        const leg = res.routes[0].legs[0];
-        path.current = res.routes[0].overview_path || [];
-        onInfo && onInfo({ km: Math.round(leg.distance.value / 100) / 10, mins: Math.round(leg.duration.value / 60) });
+        path.current = r.path;
+        add(new gm.Polyline({ map: map.current, path: r.path, strokeColor: '#2c5cf0', strokeWeight: 5, strokeOpacity: .9 }));
+        add(new gm.Marker({ map: map.current, position: r.path[0], title: 'Home', label: { text: 'H', color: '#fff', fontWeight: '700' } }));
+        add(new gm.Marker({ map: map.current, position: r.path[r.path.length - 1], title: s.school.name }));
+        const bounds = new gm.LatLngBounds(); r.path.forEach(p => bounds.extend(p)); map.current.fitBounds(bounds, 30);
+        onInfo && onInfo({ km: Math.round(r.meters / 100) / 10, mins: r.mins });
         if (variant === 'route') {
-          const h = leg.start_location;
-          [[.004, .006], [-.003, .008], [.006, -.004], [-.005, -.006]].forEach(([a, b]) => add(new gm.Marker({ map: map.current, position: { lat: h.lat() + a, lng: h.lng() + b }, title: 'A Scata family near you', icon: { path: gm.SymbolPath.CIRCLE, scale: 7, fillColor: '#9c3fd0', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 } })));
+          const h = r.path[0];
+          [[.004, .006], [-.003, .008], [.006, -.004], [-.005, -.006]].forEach(([a, b]) => add(new gm.Marker({ map: map.current, position: { lat: h.lat + a, lng: h.lng + b }, title: 'A Scata family near you', icon: { path: gm.SymbolPath.CIRCLE, scale: 7, fillColor: '#9c3fd0', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 } })));
         }
         if (variant === 'live') {
           car.current = add(new gm.Marker({ map: map.current, position: pointAlong(path.current, progress), title: 'Car on the school run', icon: { path: gm.SymbolPath.CIRCLE, scale: 10, fillColor: '#ff5630', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 }, zIndex: 9 }));
         }
-      });
+      }).catch(() => { if (!dead) onFail && onFail(); });
     }, () => onFail && onFail());
     return () => { dead = true; };
   }, [variant, travel, dest, origin]);
