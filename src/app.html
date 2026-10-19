@@ -230,6 +230,7 @@ h3 { font-size: 17px; margin: 0; font-weight: 700; text-wrap: balance; }
 <div id="app"></div>
 
 <script src="https://unpkg.com/htm@3.1.1/preact/standalone.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script>
 const { html, render, useState, useEffect, useRef, useMemo } = htmPreact;
 
@@ -280,57 +281,6 @@ const initials = (name) => name.split(/\s+/).filter(Boolean).map(w => w[0]).slic
 const uid = () => Math.random().toString(36).slice(2, 9);
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
-function seed() {
-  return {
-    v: 1,
-    route: 'login',
-    user: null,
-    accounts: [
-      { email: 'dermot.connor@etns.ie', password: 'scata123', role: 'school' },
-      { email: 'mark.kelly@gmail.com', password: 'scata123', role: 'parent' },
-    ],
-    school: { first: 'Dermot', last: 'Connor', eircode: 'D12 TR83', name: 'Educate Together National School', students: '100-200', open: '08:30-09:30', close: '14:15-15:00', code: 'sca0001' },
-    parents: [
-      ['Jayvion Simon', 'jayvion.simon@gmail.com', 'active'], ['Deja Brady', 'deja.brady@ucd.ie', 'active'], ['Harrison Stein', 'harrison.stein@mail.com', 'active'],
-      ['Lucian Obrien', 'lucian.obrien@gmail.com', 'invited'], ['Reece Chung', 'reece.chung@gmail.com', 'active'], ['Mary May', 'mary.may@gmail.com', 'active'],
-      ['Tom Williamson', 'tom.w@eircom.net', 'active'], ['Desiree Schmidt', 'desiree.s@gmail.com', 'active'], ['Arnold Aguilar', 'arnold.aguilar@gmail.com', 'active'],
-      ['Selina Boyer', 'selina.boyer@gmail.com', 'invited'], ['Abdul Rahman', 'abdul.rahman@gmail.com', 'active'],
-    ].map(([name, email, status]) => ({ id: uid(), name, email, status })),
-    parent: { first: 'Mark', last: 'Kelly', email: 'mark.kelly@gmail.com', plus: false, children: [{ id: uid(), name: 'Aaron', dob: '2012-04-23' }, { id: uid(), name: 'Darragh', dob: '2010-02-11' }] },
-    commute: { home: 'Kimmage, Dublin 12', mode: 'car', seats: 3, drop: '08:30-09:30', pick: '13:15-14:15', accepted: false },
-    families: [
-      { id: 'desiree', name: 'Desiree Schmidt', kids: 2, mins: 4, status: 'declined', outcome: 'declined' },
-      { id: 'mary', name: 'Mary May', kids: 1, mins: 2, status: 'accepted', outcome: 'accepted' },
-      { id: 'arnold', name: 'Arnold Aguilar', kids: 3, mins: 5, status: 'none', outcome: 'accepted' },
-      { id: 'tom', name: 'Tom Williamson', kids: 1, mins: 3, status: 'pending', outcome: 'accepted' },
-      { id: 'selina', name: 'Selina Boyer', kids: 1, mins: 5, status: 'none', outcome: 'accepted' },
-    ],
-    rota: null,
-    weekOffset: 0,
-    chats: {
-      mary: [
-        { me: false, text: 'Hey are you on time?', t: '8:00 AM' },
-        { me: true, text: 'Yes!', t: '8:00 AM' },
-        { me: false, text: 'Can you remind Timmy to bring his coat home?', t: '8:01 AM' },
-        { me: false, text: 'He forgot it again!!', t: '8:01 AM' },
-        { me: true, text: 'No problem!', t: '8:01 AM' },
-      ],
-    },
-    notifications: [
-      { id: uid(), kind: 'invite', text: 'Mary May accepted your invitation to share the school commute.', at: Date.now() - 3600e3, read: false },
-    ],
-    events: [],
-    trip: { started: null },
-  };
-}
-
-const KEY = 'scata-app-v1';
-function load() {
-  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.v === 1) return s; } catch (e) {}
-  return seed();
-}
-function save(s) { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {} }
-
 /* ---------- maths ---------- */
 const SCHOOL_DAYS = 183, ROUND_KM = 10, EUR_PER_KM = 0.3, CO2_PER_KM = 0.17, MINS_PER_TRIP = 25;
 function savings(mode, groupSize) {
@@ -353,15 +303,6 @@ const gmDirections = (s, mode) => 'https://www.google.com/maps/dir/?api=1' + (s.
 const gmPlace = (s) => 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(schoolPlace(s));
 function MapLink({ href, children }) { return html`<a class="maplink" href=${href} target="_blank" rel="noopener">${I.pin}${children}</a>`; }
 const fmt = (n) => n.toLocaleString('en-IE');
-
-function buildRota(state) {
-  const members = ['me', ...state.families.filter(f => f.status === 'accepted').map(f => f.id)];
-  const slots = [];
-  DAYS.forEach((d, i) => ['drop', 'pick'].forEach(kind => slots.push({ id: d + kind, day: i, kind })));
-  // Rotate so each family gets an even share; leftover trips go to different families each 4 weeks.
-  slots.forEach((s, i) => { s.who = members[i % members.length]; s.confirmed = s.who !== 'me' && i % 3 !== 1; });
-  return slots;
-}
 
 /* ---------- bits ---------- */
 function Logo({ size = 'sm', plus }) {
@@ -476,11 +417,14 @@ async function computeRoute(gm, origin, destination, travel) {
   if (!r || !r.path || !r.path.length) throw new Error('no route');
   return { path: r.path.map(toLL), meters: r.distanceMeters || 0, mins: Math.round((r.durationMillis || 0) / 60000) };
 }
-function GoogleMap({ s, variant, mode, progress = 0, onInfo, onFail, label }) {
+function GoogleMap({ s, variant, mode, progress = 0, carPos, from, onInfo, onFail, label }) {
   const el = useRef(), map = useRef(), car = useRef(), path = useRef([]), extras = useRef([]);
   const travel = mode || s.commute.mode;
   const dest = schoolPlace(s);
   const origin = s.commute.home ? s.commute.home + ', Ireland' : '';
+  const start = from ? { lat: from.lat, lng: from.lng } : origin;
+  const startKey = from ? from.lat.toFixed(4) + ',' + from.lng.toFixed(4) : origin;
+  const carAt = () => carPos ? { lat: carPos.lat, lng: carPos.lng } : pointAlong(path.current, progress);
   useEffect(() => {
     let dead = false;
     loadMaps().then(gm => {
@@ -488,7 +432,7 @@ function GoogleMap({ s, variant, mode, progress = 0, onInfo, onFail, label }) {
       if (!map.current) map.current = new gm.Map(el.current, { center: { lat: 53.33, lng: -6.29 }, zoom: 13, disableDefaultUI: true, zoomControl: true, gestureHandling: 'cooperative', clickableIcons: false });
       extras.current.forEach(x => x.setMap(null)); extras.current = [];
       const add = (x) => { extras.current.push(x); return x; };
-      if (variant === 'catchment' || !origin) {
+      if (variant === 'catchment' || !start) {
         new gm.Geocoder().geocode({ address: dest, region: 'ie' }, (res, status) => {
           if (dead) return;
           if (status !== 'OK' || !res[0]) { onFail && onFail(); return; }
@@ -502,26 +446,22 @@ function GoogleMap({ s, variant, mode, progress = 0, onInfo, onFail, label }) {
         });
         return;
       }
-      computeRoute(gm, origin, dest, travel).then(r => {
+      computeRoute(gm, start, dest, travel).then(r => {
         if (dead) return;
         path.current = r.path;
         add(new gm.Polyline({ map: map.current, path: r.path, strokeColor: '#2c5cf0', strokeWeight: 5, strokeOpacity: .9 }));
-        add(new gm.Marker({ map: map.current, position: r.path[0], title: 'Home', label: { text: 'H', color: '#fff', fontWeight: '700' } }));
+        add(new gm.Marker({ map: map.current, position: r.path[0], title: from ? 'Start' : 'Home', label: { text: from ? '' : 'H', color: '#fff', fontWeight: '700' } }));
         add(new gm.Marker({ map: map.current, position: r.path[r.path.length - 1], title: s.school.name }));
         const bounds = new gm.LatLngBounds(); r.path.forEach(p => bounds.extend(p)); map.current.fitBounds(bounds, 30);
         onInfo && onInfo({ km: Math.round(r.meters / 100) / 10, mins: r.mins });
-        if (variant === 'route') {
-          const h = r.path[0];
-          [[.004, .006], [-.003, .008], [.006, -.004], [-.005, -.006]].forEach(([a, b]) => add(new gm.Marker({ map: map.current, position: { lat: h.lat + a, lng: h.lng + b }, title: 'A Scata family near you', icon: { path: gm.SymbolPath.CIRCLE, scale: 7, fillColor: '#9c3fd0', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 } })));
-        }
         if (variant === 'live') {
-          car.current = add(new gm.Marker({ map: map.current, position: pointAlong(path.current, progress), title: 'Car on the school run', icon: { path: gm.SymbolPath.CIRCLE, scale: 10, fillColor: '#ff5630', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 }, zIndex: 9 }));
+          car.current = add(new gm.Marker({ map: map.current, position: carAt(), title: 'Car on the school run', icon: { path: gm.SymbolPath.CIRCLE, scale: 10, fillColor: '#ff5630', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 }, zIndex: 9 }));
         }
       }).catch(() => { if (!dead) onFail && onFail(); });
     }, () => onFail && onFail());
     return () => { dead = true; };
-  }, [variant, travel, dest, origin]);
-  useEffect(() => { if (car.current && path.current.length) car.current.setPosition(pointAlong(path.current, progress)); }, [progress]);
+  }, [variant, travel, dest, startKey]);
+  useEffect(() => { if (car.current && (carPos || path.current.length)) car.current.setPosition(carAt()); }, [progress, carPos && carPos.lat, carPos && carPos.lng]);
   return html`<div ref=${el} class="map gmap" role="region" aria-label=${label || 'Google map'}></div>`;
 }
 function SmartMap(props) {
@@ -531,25 +471,6 @@ function SmartMap(props) {
 }
 
 /* ---------- charts ---------- */
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'];
-const BARS = [47, 33, 40, 47, 40, 40, 70, 87, 35];
-const EURO = [12, 14, 20, 38, 38, 38, 45, 50, 32];
-const TIME = [8, 10, 18, 30, 44, 42, 54, 60, 36];
-function ReportChart() {
-  const W = 320, H = 220, L = 30, B = 24, T = 10, R = 8;
-  const x = (i) => L + (i + .5) * (W - L - R) / MONTHS.length;
-  const y = (v) => H - B - v / 100 * (H - B - T);
-  const smooth = (arr) => arr.map((v, i) => { if (!i) return `M${x(0)} ${y(v)}`; const px = x(i - 1), cx = x(i); const mx = (px + cx) / 2; return `C${mx} ${y(arr[i - 1])} ${mx} ${y(v)} ${cx} ${y(v)}`; }).join(' ');
-  return html`<svg class="chart" viewBox=${`0 0 ${W} ${H}`} role="img" aria-label="Monthly savings, January to September">
-    ${[0, 20, 40, 60, 80, 100].map(v => html`<g><line x1=${L} x2=${W - R} y1=${y(v)} y2=${y(v)} stroke="var(--line)" stroke-dasharray="3 4"/><text x=${L - 6} y=${y(v) + 4} text-anchor="end">${v}</text></g>`)}
-    ${BARS.map((v, i) => html`<rect x=${x(i) - 4} y=${y(v)} width="8" height=${y(0) - y(v)} rx="2" fill="var(--green)"/>`)}
-    <path d=${smooth(EURO) + ` L${x(8)} ${y(0)} L${x(0)} ${y(0)} Z`} fill="var(--amber)" fill-opacity=".1"/>
-    <path d=${smooth(EURO)} fill="none" stroke="var(--amber)" stroke-width="2.5"/>
-    <path d=${smooth(TIME)} fill="none" stroke="var(--blue)" stroke-width="2.5"/>
-    <circle cx=${x(8)} cy=${y(TIME[8])} r="3.5" fill="var(--blue)"/><circle cx=${x(8)} cy=${y(EURO[8])} r="3.5" fill="var(--amber)"/>
-    ${MONTHS.map((m, i) => html`<text x=${x(i)} y=${H - 6} text-anchor="middle">${m}</text>`)}
-  </svg>`;
-}
 function Pie({ data }) {
   const total = data.reduce((a, d) => a + d.v, 0); let a0 = -Math.PI / 2; const r = 100, c = 110;
   return html`<svg class="chart" viewBox="0 0 220 220" role="img" aria-label="Trips by commute type" style="max-width:240px;justify-self:center">
@@ -560,114 +481,166 @@ function Pie({ data }) {
   </svg>`;
 }
 
+/* ---------- backend ---------- */
+const CFG = window.SCATA_CONFIG || {};
+const sb = (CFG.supabaseUrl && CFG.supabaseAnonKey && window.supabase) ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey) : null;
+const SITE = location.origin + location.pathname;
+async function q(promise) { const { data, error } = await promise; if (error) throw new Error(error.message); return data; }
+const rpc = (name, args) => q(sb.rpc(name, args || {}));
+const clock = (d) => `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${d.getHours() < 12 ? 'AM' : 'PM'}`;
+const ago = (t) => { const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 1 ? 'Just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
+const isoDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+function mondayOf(offset) {
+  const d = new Date(); d.setHours(12, 0, 0, 0);
+  const day = d.getDay(); const diff = day === 0 ? 1 : day === 6 ? 2 : 1 - day;
+  d.setDate(d.getDate() + diff + offset * 7); return d;
+}
+function weekNo(d) { const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); const n = t.getUTCDay() || 7; t.setUTCDate(t.getUTCDate() + 4 - n); const y = new Date(Date.UTC(t.getUTCFullYear(), 0, 1)); return Math.ceil(((t - y) / 864e5 + 1) / 7); }
+const slotLabel = (slot) => `${DAYS[slot.day]} ${slot.kind === 'drop' ? 'drop-off' : 'pick-up'}`;
+async function geocode(address) {
+  try {
+    const gm = await loadMaps();
+    return await new Promise(res => new gm.Geocoder().geocode({ address, region: 'ie' }, (r, st) => res(st === 'OK' && r[0] ? { lat: r[0].geometry.location.lat(), lng: r[0].geometry.location.lng() } : null)));
+  } catch (e) { return null; }
+}
+// Shape the map helpers expect.
+const mapState = (a) => ({ school: a.school || { name: '', eircode: '' }, commute: { home: (a.commute && a.commute.home) || '', mode: (a.commute && a.commute.mode) || 'car' } });
+const initialCode = (() => { try { const c = new URLSearchParams(location.search).get('school'); if (c) sessionStorage.setItem('scata-code', c); return c || sessionStorage.getItem('scata-code') || ''; } catch (e) { return ''; } })();
+
 /* ---------- app ---------- */
 function App() {
-  const [s, setS] = useState(load);
+  const [session, setSession] = useState(undefined);
+  const [d, setD] = useState({ loaded: false });
+  const [route, setRoute] = useState('login');
   const [drawer, setDrawer] = useState(false);
   const [toast, setToast] = useState('');
+  const [busy, setBusy] = useState(false);
   const toastT = useRef();
-  const update = (fn) => setS(prev => { const next = JSON.parse(JSON.stringify(prev)); fn(next); return next; });
-  const go = (route) => { update(n => { n.route = route; }); setDrawer(false); try { document.querySelector('.phone').scrollIntoView(); window.scrollTo(0, 0); } catch (e) {} };
-  const say = (msg) => { setToast(msg); clearTimeout(toastT.current); toastT.current = setTimeout(() => setToast(''), 2600); };
-  useEffect(() => save(s), [s]);
+  const say = (msg) => { setToast(msg); clearTimeout(toastT.current); toastT.current = setTimeout(() => setToast(''), 3200); };
+  const go = (r) => { setRoute(r); setDrawer(false); try { window.scrollTo(0, 0); } catch (e) {} };
+  const uid = session && session.user.id;
 
-  // Simulated other parents: queued replies resolve after a short wait.
   useEffect(() => {
-    const t = setInterval(() => {
-      const now = Date.now();
-      setS(prev => {
-        const due = prev.events.filter(e => e.at <= now);
-        if (!due.length) return prev;
-        const n = JSON.parse(JSON.stringify(prev));
-        n.events = n.events.filter(e => e.at > now);
-        due.forEach(e => {
-          if (e.type === 'invite') {
-            const f = n.families.find(x => x.id === e.fam); if (!f || f.status !== 'pending') return;
-            f.status = f.outcome;
-            n.notifications.unshift({ id: uid(), kind: 'invite', text: `${f.name} ${f.outcome === 'accepted' ? 'accepted' : 'declined'} your invitation to share the school commute.`, at: now, read: false });
-            if (f.outcome === 'accepted' && n.rota) n.rota = buildRota(n);
-          }
-          if (e.type === 'reply') {
-            (n.chats[e.fam] = n.chats[e.fam] || []).push({ me: false, text: e.text, t: clock(new Date()) });
-          }
-          if (e.type === 'swap') {
-            const f = n.families.find(x => x.id === e.fam);
-            n.notifications.unshift({ id: uid(), kind: 'cal', text: `${f ? f.name : 'A parent'} agreed to swap: you now have ${e.label}.`, at: now, read: false });
-            const slot = n.rota && n.rota.find(x => x.id === e.slot); if (slot) slot.confirmed = true;
-          }
-          if (e.type === 'update') {
-            const slot = n.rota && n.rota.find(x => x.id === e.slot); if (slot) slot.confirmed = true;
-            const f = n.families.find(x => x.id === e.fam);
-            n.notifications.unshift({ id: uid(), kind: 'cal', text: `${f ? f.name : 'A parent'} confirmed their ${e.label} slot.`, at: now, read: false });
-          }
-        });
-        return n;
-      });
-    }, 1000);
-    return () => clearInterval(t);
+    if (!sb) return;
+    sb.auth.getSession().then(({ data }) => setSession(data.session || null));
+    const { data: sub } = sb.auth.onAuthStateChange((evt, s) => { setSession(s || null); if (evt === 'PASSWORD_RECOVERY') setRoute('newPassword'); });
+    return () => sub.subscription.unsubscribe();
   }, []);
 
-  const ctx = { s, update, go, say, setDrawer };
-  const r = s.route;
-  const authed = s.user;
+  const loadGroups = async (prev) => {
+    const owned = await q(sb.from('commute_groups').select('*').eq('owner_id', uid));
+    const mem = await q(sb.from('group_members').select('*').eq('parent_id', uid));
+    const groups = [...owned.map(g => ({ id: g.id, mine: true, status: 'accepted' })), ...mem.map(m => ({ id: m.group_id, mine: false, status: m.status }))];
+    const usable = groups.filter(g => g.status === 'accepted');
+    const keep = prev && usable.some(g => g.id === prev) ? prev : (usable[0] ? usable[0].id : null);
+    const people = {};
+    for (const g of groups) people[g.id] = await rpc('group_people', { p_group: g.id });
+    return { groups, gid: keep, people };
+  };
+
+  const load = async (initial) => {
+    if (!uid) return;
+    try {
+      const profile = await q(sb.from('profiles').select('*').eq('id', uid).maybeSingle());
+      if (!profile) { setD({ loaded: true, profile: null }); if (initial) setRoute(route === 'newPassword' ? 'newPassword' : 'choice'); return; }
+      const school = profile.school_id ? await q(sb.from('schools').select('*').eq('id', profile.school_id).maybeSingle()) : null;
+      const notifications = await q(sb.from('notifications').select('*').order('created_at', { ascending: false }).limit(50));
+      let extra = {};
+      if (profile.role === 'parent') {
+        const commute = await q(sb.from('commutes').select('*').eq('parent_id', uid).maybeSingle());
+        const children = await q(sb.from('children').select('*').order('created_at'));
+        extra = { commute, children, ...(await loadGroups(d.gid)) };
+      }
+      setD({ loaded: true, profile, school, notifications, ...extra });
+      if (initial && route !== 'newPassword') setRoute(profile.role === 'school' ? 'schoolOverview' : (extra.commute && extra.commute.accepted_terms ? 'manage' : 'setup'));
+    } catch (e) { say(e.message); setD(x => ({ ...x, loaded: true })); }
+  };
+  useEffect(() => { if (session) load(true); else if (session === null) { setD({ loaded: true }); if (!['register', 'checkEmail', 'forgot'].includes(route)) setRoute('login'); } }, [uid]);
+
+  // Live updates: my notifications (invites, swaps, chat) refresh what I see.
+  useEffect(() => {
+    if (!uid || !d.profile) return;
+    const ch = sb.channel('me-' + uid)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${uid}` }, (p) => { say(p.new.body); load(false); })
+      .subscribe();
+    return () => { sb.removeChannel(ch); };
+  }, [uid, !!d.profile]);
+
+  const a = {
+    ...d, uid, session, route, go, say, busy, reload: () => load(false), setGid: (gid) => setD(x => ({ ...x, gid })),
+    run: async (fn, ok) => { setBusy(true); try { const r = await fn(); if (ok) say(ok); return r; } catch (e) { say(e.message); throw e; } finally { setBusy(false); } },
+  };
+
+  if (!sb) return html`<div class="phone"><main class="screen" style="padding-top:28px"><div class="logo-wrap"><${Logo} size="lg" /></div><div class="card note"><h3>Scata isn’t connected to its database yet</h3><p style="margin:0">The site needs its Supabase address and public key in config.js.</p></div></main></div>`;
+  if (session === undefined || (session && !d.loaded)) return html`<div class="phone"><main class="screen" style="padding-top:40px"><div class="logo-wrap"><${Logo} size="lg" /></div><p class="center muted">Loading…</p></main></div>`;
+
   const screens = {
-    login: Login, register: Register, choice: Choice, schoolInfo: SchoolInfo, parentInfo: ParentInfo,
+    login: Login, register: Register, checkEmail: CheckEmail, forgot: Forgot, newPassword: NewPassword,
+    choice: Choice, schoolInfo: SchoolInfo, parentInfo: ParentInfo,
     schoolOverview: SchoolOverview, invite: InviteParents, schoolProfile: SchoolProfile, reports: Reports,
     setup: Setup, match: Match, terms: Terms, manage: Manage, calendar: Calendar, trip: NextTrip,
     profile: ParentProfile, commutes: Commutes, newChild: NewChild, notifications: Notifications, plus: Plus, live: Live,
   };
+  const signedOutOnly = ['login', 'register', 'checkEmail', 'forgot'];
+  let r = route;
+  if (!session && !signedOutOnly.includes(r)) r = 'login';
+  if (session && signedOutOnly.includes(r)) r = d.profile ? (d.profile.role === 'school' ? 'schoolOverview' : 'manage') : 'choice';
+  if (session && !d.profile && !['choice', 'schoolInfo', 'parentInfo', 'newPassword'].includes(r)) r = 'choice';
+  if (d.profile && d.profile.role === 'school' && !['schoolOverview', 'invite', 'schoolProfile', 'reports', 'newPassword'].includes(r)) r = 'schoolOverview';
+  if (d.profile && d.profile.role === 'parent' && ['schoolOverview', 'invite', 'schoolProfile', 'reports', 'choice', 'schoolInfo', 'parentInfo'].includes(r)) r = 'manage';
   const Screen = screens[r] || Login;
-  const preAuth = ['login', 'register', 'choice', 'schoolInfo', 'parentInfo'].includes(r);
-  const unread = s.notifications.filter(n => !n.read).length;
-  const meName = authed ? (authed.role === 'school' ? `${s.school.first} ${s.school.last}` : `${s.parent.first} ${s.parent.last}`) : '';
-  const plusOn = authed && authed.role === 'parent' && s.parent.plus;
+  const unread = (d.notifications || []).filter(n => !n.read).length;
+  const meName = d.profile ? `${d.profile.first_name} ${d.profile.last_name}` : '';
+  const showTop = !!d.profile;
 
   return html`<div class="phone">
-    ${!preAuth && authed ? html`<header class="top">
+    ${showTop ? html`<header class="top">
       <button class="iconbtn" aria-label="Open menu" onClick=${() => setDrawer(true)}>${I.menu}</button>
-      <${Logo} plus=${plusOn} />
-      <button class="iconbtn" aria-label=${authed.role === 'parent' ? `Notifications, ${unread} unread` : 'Profile'} onClick=${() => go(authed.role === 'parent' ? 'notifications' : 'schoolProfile')}>
-        <${Avatar} name=${meName} size="sm" />${authed.role === 'parent' && unread ? html`<span class="badge">${unread}</span>` : ''}
+      <${Logo} plus=${d.profile.role === 'parent' && d.profile.plus} />
+      <button class="iconbtn" aria-label=${`Notifications, ${unread} unread`} onClick=${() => go(d.profile.role === 'parent' ? 'notifications' : 'schoolProfile')}>
+        <${Avatar} name=${meName} size="sm" />${unread ? html`<span class="badge">${unread}</span>` : ''}
       </button>
     </header>` : ''}
-    <${Screen} ...${ctx} />
-    ${drawer ? html`<${Drawer} ...${ctx} meName=${meName} />` : ''}
+    <${Screen} a=${a} />
+    ${drawer ? html`<${Drawer} a=${a} meName=${meName} close=${() => setDrawer(false)} />` : ''}
     ${toast ? html`<div class="toast" role="status">${toast}</div>` : ''}
   </div>`;
 }
-const clock = (d) => `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${d.getHours() < 12 ? 'AM' : 'PM'}`;
 
-function Drawer({ s, go, update, say, setDrawer, meName }) {
-  const school = s.user.role === 'school';
+function Drawer({ a, meName, close }) {
+  const school = a.profile.role === 'school';
   const items = school
-    ? [['schoolOverview', 'Overview', I.home], ['invite', 'Invite parents', I.mail], ['schoolProfile', 'School profile', I.user], ['reports', 'Reports', I.chart]]
-    : [['manage', 'My commute', I.home], ['calendar', 'Calendar', I.cal], ['trip', 'Next school trip', I.route], ['commutes', 'Commutes', I.car], ['profile', 'My profile', I.user], ['notifications', 'Notifications', I.bell], ['plus', s.parent.plus ? 'Scata Plus (on)' : 'Get Scata Plus', I.bolt]];
-  return html`<div class="drawer-bg" onClick=${() => setDrawer(false)}></div>
+    ? [['schoolOverview', 'Overview', I.home], ['invite', 'Invite parents', I.mail], ['schoolProfile', 'Parents', I.user], ['reports', 'Reports', I.chart]]
+    : [['manage', 'My commute', I.home], ['calendar', 'Calendar', I.cal], ['trip', 'Next school trip', I.route], ['commutes', 'Commutes', I.car], ['profile', 'My profile', I.user], ['notifications', 'Notifications', I.bell], ...(a.profile.plus ? [['live', 'Live tracking and chat', I.route], ['plus', 'Scata Plus (on)', I.bolt]] : [['plus', 'Get Scata Plus', I.bolt]])];
+  return html`<div class="drawer-bg" onClick=${close}></div>
   <nav class="drawer" aria-label="Main menu">
-    <div class="me"><${Avatar} name=${meName} size="sm" /><div><b>${meName}</b><div class="small muted">${school ? 'School manager' : 'Parent'} · ${s.school.name}</div></div></div>
-    ${items.map(([r, label, ico]) => html`<button class=${'navi' + (s.route === r ? ' on' : '')} onClick=${() => go(r)}>${ico}${label}</button>`)}
+    <div class="me"><${Avatar} name=${meName} size="sm" /><div><b>${meName}</b><div class="small muted">${school ? 'School manager' : 'Parent'} · ${a.school ? a.school.name : ''}</div></div></div>
+    ${items.map(([r, label, ico]) => html`<button class=${'navi' + (a.route === r ? ' on' : '')} onClick=${() => a.go(r)}>${ico}${label}</button>`)}
     <hr/>
-    <button class="navi" onClick=${() => { update(n => { n.user = null; n.route = 'login'; }); setDrawer(false); }}>${I.out}Sign out</button>
-    <button class="navi" onClick=${() => { const fresh = seed(); update(n => { Object.keys(n).forEach(k => delete n[k]); Object.assign(n, fresh); }); setDrawer(false); say('Demo data reset'); }}>${I.reset}Reset demo data</button>
+    <button class="navi" onClick=${async () => { close(); await sb.auth.signOut(); a.go('login'); }}>${I.out}Sign out</button>
   </nav>`;
 }
 
 /* ---------- auth ---------- */
-function Login({ s, update, go }) {
+function AuthTop({ back, a }) {
+  return html`${back ? html`<div class="row"><button class="iconbtn" aria-label="Back" onClick=${() => a.go(back)}>${I.back}</button></div>` : ''}
+    <div class="logo-wrap"><${Logo} size="lg" /><span class="tagline">Safe, sustainable school commute</span></div>`;
+}
+const emailOk = (e) => /^\S+@\S+\.\S+$/.test(e.trim());
+
+function Login({ a }) {
   const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
   const [show, setShow] = useState(false);
   const [err, setErr] = useState('');
-  const enter = (role) => update(n => { n.user = { role }; n.route = role === 'school' ? 'schoolOverview' : (n.commute.accepted ? 'manage' : 'setup'); });
-  const submit = (e) => {
-    e.preventDefault();
-    const acc = s.accounts.find(a => a.email.toLowerCase() === email.trim().toLowerCase());
-    if (!acc || acc.password !== pw) { setErr('That email and password don’t match an account. Check them, or use a demo account below.'); return; }
-    enter(acc.role);
+  const submit = async (e) => {
+    e.preventDefault(); setErr('');
+    const { error } = await sb.auth.signInWithPassword({ email: email.trim(), password: pw });
+    if (error) setErr(/confirm/i.test(error.message) ? 'Please confirm your email first. Check your inbox for the link we sent.' : 'That email and password don’t match an account. Check them, or create an account.');
   };
   return html`<main class="screen" style="padding-top:28px">
-    <div class="logo-wrap"><${Logo} size="lg" /><span class="tagline">Safe, sustainable school commute</span></div>
-    <div class="hello"><h1>Sign in to SCATA</h1><p style="font-style:normal">New user? <button class="link" onClick=${() => go('register')}>Create an account</button></p></div>
+    <${AuthTop} a=${a} />
+    <div class="hello"><h1>Sign in to SCATA</h1><p style="font-style:normal">New user? <button class="link" onClick=${() => a.go('register')}>Create an account</button></p></div>
     <form class="form" onSubmit=${submit}>
       <${Field} id="login-email" label="Email address" type="email" value=${email} onInput=${v => { setEmail(v); setErr(''); }} autocomplete="email" />
       <div class="field">
@@ -676,69 +649,102 @@ function Login({ s, update, go }) {
         <button type="button" class="iconbtn" aria-label=${show ? 'Hide password' : 'Show password'} onClick=${() => setShow(!show)} style="position:absolute;right:4px;top:4px">${I.eye}</button>
         ${err ? html`<span class="err">${err}</span>` : ''}
       </div>
-      <div style="text-align:right"><button type="button" class="link u" onClick=${() => setErr('Password reset emails arrive once Scata has a live server. For now use a demo account below.')}>Forgot password?</button></div>
-      <button class="btn" type="submit">Login</button>
+      <div style="text-align:right"><button type="button" class="link u" onClick=${() => a.go('forgot')}>Forgot password?</button></div>
+      <button class="btn" type="submit" disabled=${!email || !pw}>Login</button>
     </form>
-    <div class="or">OR TRY A DEMO ACCOUNT</div>
-    <button class="demo-btn" onClick=${() => enter('school')}><${Avatar} name="Dermot Connor" size="sm" /><span><b>School</b> Sign in as <b>Dermot Connor</b></span></button>
-    <button class="demo-btn" onClick=${() => enter('parent')}><${Avatar} name="Mark Kelly" size="sm" /><span><b>Parent</b> Sign in as <b>Mark Kelly</b></span></button>
-    <p class="demo-note">Demo accounts use password scata123. Everything you do is saved in this browser only.</p>
+    ${initialCode ? html`<p class="small muted center">You’re joining with school code <b>${initialCode}</b>. Create an account to continue.</p>` : ''}
   </main>`;
 }
 
-function Register({ s, update, go }) {
+function Register({ a }) {
   const [f, setF] = useState({ email: '', pw: '', pw2: '' });
   const [tried, setTried] = useState(false);
-  const errs = {
-    email: !/^\S+@\S+\.\S+$/.test(f.email) ? 'Enter an email address like name@example.ie' : s.accounts.some(a => a.email.toLowerCase() === f.email.toLowerCase()) ? 'An account already uses this email. Sign in instead.' : '',
-    pw: f.pw.length < 8 ? 'Use at least 8 characters' : '',
-    pw2: f.pw2 !== f.pw ? 'The passwords don’t match' : '',
-  };
+  const [err, setErr] = useState('');
+  const errs = { email: !emailOk(f.email) ? 'Enter an email address like name@example.ie' : '', pw: f.pw.length < 8 ? 'Use at least 8 characters' : '', pw2: f.pw2 !== f.pw ? 'The passwords don’t match' : '' };
   const ok = !errs.email && !errs.pw && !errs.pw2;
+  const submit = async (e) => {
+    e.preventDefault(); setTried(true); setErr(''); if (!ok) return;
+    const { data, error } = await sb.auth.signUp({ email: f.email.trim(), password: f.pw, options: { emailRedirectTo: SITE } });
+    if (error) { setErr(/registered/i.test(error.message) ? 'An account already uses this email. Sign in instead.' : error.message); return; }
+    if (!data.session) a.go('checkEmail');
+  };
   return html`<main class="screen" style="padding-top:20px">
-    <div class="row"><button class="iconbtn" aria-label="Back" onClick=${() => go('login')}>${I.back}</button></div>
-    <div class="logo-wrap"><${Logo} size="lg" /><span class="tagline">Safe, sustainable school commute</span></div>
-    <div class="hello"><h1>Safe, sustainable</h1><p style="font-style:normal">Already have an account? <button class="link" onClick=${() => go('login')}>Sign in</button></p></div>
-    <form class="form" onSubmit=${e => { e.preventDefault(); setTried(true); if (!ok) return; update(n => { n.pending = { email: f.email.trim(), password: f.pw }; n.route = 'choice'; }); }}>
+    <${AuthTop} a=${a} back="login" />
+    <div class="hello"><h1>Create your account</h1><p style="font-style:normal">Already have one? <button class="link" onClick=${() => a.go('login')}>Sign in</button></p></div>
+    <form class="form" onSubmit=${submit}>
       <${Field} id="reg-email" label="Email address" type="email" value=${f.email} onInput=${v => setF({ ...f, email: v })} err=${tried && errs.email} autocomplete="email" />
       <${Field} id="reg-pw" label="Password" type="password" value=${f.pw} onInput=${v => setF({ ...f, pw: v })} err=${tried && errs.pw} hint="At least 8 characters" autocomplete="new-password" />
       <${Field} id="reg-pw2" label="Confirm password" type="password" value=${f.pw2} onInput=${v => setF({ ...f, pw2: v })} err=${tried && errs.pw2} autocomplete="new-password" />
+      ${err ? html`<span class="err">${err}</span>` : ''}
       <button class="btn" type="submit">Create account</button>
     </form>
     <p class="small muted center">By signing up you agree to the Scata terms of service and privacy policy.</p>
   </main>`;
 }
 
-function Choice({ s, update, go }) {
-  const [pick, setPick] = useState('');
+function CheckEmail({ a }) {
+  return html`<main class="screen" style="padding-top:28px">
+    <${AuthTop} a=${a} />
+    <div class="card note"><h3>Check your email</h3><p style="margin:0">We’ve sent you a link to confirm your address. Open it on this device and you’ll come straight back here, signed in.</p></div>
+    <button class="btn ghost" onClick=${() => a.go('login')}>Back to sign in</button>
+  </main>`;
+}
+
+function Forgot({ a }) {
+  const [email, setEmail] = useState('');
+  const [sent, setSent] = useState(false);
   return html`<main class="screen" style="padding-top:20px">
-    <div class="row"><button class="iconbtn" aria-label="Back" onClick=${() => go('register')}>${I.back}</button></div>
+    <${AuthTop} a=${a} back="login" />
+    <div class="hello"><h1>Reset your password</h1></div>
+    ${sent ? html`<div class="card note"><p style="margin:0">If an account uses <b>${email}</b>, a reset link is on its way. Open it on this device to choose a new password.</p></div>` : html`
+    <form class="form" onSubmit=${async e => { e.preventDefault(); if (!emailOk(email)) return; await sb.auth.resetPasswordForEmail(email.trim(), { redirectTo: SITE }); setSent(true); }}>
+      <${Field} id="fg-email" label="Email address" type="email" value=${email} onInput=${setEmail} autocomplete="email" />
+      <button class="btn" type="submit" disabled=${!emailOk(email)}>Send reset link</button>
+    </form>`}
+  </main>`;
+}
+
+function NewPassword({ a }) {
+  const [pw, setPw] = useState('');
+  return html`<main class="screen" style="padding-top:20px">
+    <${AuthTop} a=${a} />
+    <div class="hello"><h1>Choose a new password</h1></div>
+    <form class="form" onSubmit=${async e => { e.preventDefault(); if (pw.length < 8) return; await a.run(() => q(sb.auth.updateUser({ password: pw })), 'Password changed'); await a.reload(); a.go('login'); }}>
+      <${Field} id="np-pw" label="New password" type="password" value=${pw} onInput=${setPw} hint="At least 8 characters" autocomplete="new-password" />
+      <button class="btn" type="submit" disabled=${pw.length < 8}>Save password</button>
+    </form>
+  </main>`;
+}
+
+function Choice({ a }) {
+  const [pick, setPick] = useState(initialCode ? 'parent' : '');
+  return html`<main class="screen" style="padding-top:20px">
     <div class="logo-wrap"><${Logo} size="lg" /></div>
     <div class="hello"><h1>Are you a…</h1><p style="font-style:normal">Schools sign up first and invite their parents.</p></div>
     <div class="who-card">
       <button class=${pick === 'school' ? 'on' : ''} aria-pressed=${pick === 'school'} onClick=${() => setPick('school')}>${I.school}School</button>
       <button class=${pick === 'parent' ? 'on' : ''} aria-pressed=${pick === 'parent'} onClick=${() => setPick('parent')}>${I.parent}Parent</button>
     </div>
-    <${Action} disabled=${!pick} onClick=${() => go(pick === 'school' ? 'schoolInfo' : 'parentInfo')}>Let’s Go!<//>
+    <${Action} disabled=${!pick} onClick=${() => a.go(pick === 'school' ? 'schoolInfo' : 'parentInfo')}>Let’s Go!<//>
+    <button class="link u center" onClick=${() => sb.auth.signOut()}>Sign out</button>
   </main>`;
 }
 
-function SchoolInfo({ s, update, go }) {
+function SchoolInfo({ a }) {
   const [f, setF] = useState({ first: '', last: '', eircode: '', name: '', students: '100-200', open: '08:30-09:30', close: '14:15-15:00' });
   const [tried, setTried] = useState(false);
   const set = (k) => (v) => setF({ ...f, [k]: v });
   const eirOk = /^[A-Za-z]\d[\dWw]\s?[A-Za-z0-9]{4}$/.test(f.eircode.trim());
   const ok = f.first && f.last && f.name && eirOk;
-  const submit = (e) => {
-    e.preventDefault(); setTried(true); if (!ok) return;
-    update(n => {
-      n.school = { ...f, eircode: f.eircode.toUpperCase().replace(/^(\w{3})\s?(\w{4})$/, '$1 $2'), code: 'sca' + String(Math.floor(Math.random() * 9000) + 1000) };
-      if (n.pending) { n.accounts.push({ ...n.pending, role: 'school' }); n.pending = null; }
-      n.user = { role: 'school' }; n.route = 'schoolOverview';
-    });
+  const submit = async (e) => {
+    e.preventDefault(); setTried(true); if (!ok || a.busy) return;
+    const eir = f.eircode.toUpperCase().replace(/^(\w{3})\s?(\w{4})$/, '$1 $2');
+    const pos = await geocode(`${f.name}, ${eir}, Ireland`);
+    await a.run(() => rpc('create_school', { p_first: f.first, p_last: f.last, p_name: f.name, p_eircode: eir, p_students: f.students, p_open: f.open, p_close: f.close, p_lat: pos && pos.lat, p_lng: pos && pos.lng }), 'Your school is set up');
+    await a.reload(); a.go('schoolOverview');
   };
   return html`<main class="screen" style="padding-top:20px">
-    <div class="row"><button class="iconbtn" aria-label="Back" onClick=${() => go('choice')}>${I.back}</button><div class="grow"><${Logo} /></div><span style="width:40px"></span></div>
+    <div class="row"><button class="iconbtn" aria-label="Back" onClick=${() => a.go('choice')}>${I.back}</button><div class="grow"><${Logo} /></div><span style="width:40px"></span></div>
     <h2 class="title center">Fill in school information</h2>
     <form class="form" onSubmit=${submit} id="school-form">
       <div class="grid2">
@@ -753,34 +759,34 @@ function SchoolInfo({ s, update, go }) {
         <${Field} id="si-close" label="Closing time" value=${f.close} onInput=${set('close')} />
       </div>
     </form>
-    <div class="action"><button class="btn" type="submit" form="school-form">Let’s Go!</button></div>
+    <div class="action"><button class="btn" type="submit" form="school-form" disabled=${a.busy}>${a.busy ? 'Setting up…' : 'Let’s Go!'}</button></div>
   </main>`;
 }
 
-function ParentInfo({ s, update, go }) {
-  const [f, setF] = useState({ first: '', last: '', code: '', child: '', dob: '' });
+function ParentInfo({ a }) {
+  const [f, setF] = useState({ first: '', last: '', code: initialCode, child: '', dob: '' });
   const [tried, setTried] = useState(false);
-  const set = (k) => (v) => setF({ ...f, [k]: v });
-  const codeOk = f.code.trim().toLowerCase() === s.school.code;
-  const ok = f.first && f.last && codeOk && f.child && f.dob;
-  const submit = (e) => {
-    e.preventDefault(); setTried(true); if (!ok) return;
-    update(n => {
-      n.parent = { first: f.first, last: f.last, email: n.pending ? n.pending.email : '', plus: false, children: [{ id: uid(), name: f.child, dob: f.dob }] };
-      n.commute.accepted = false; n.rota = null;
-      if (n.pending) { n.accounts.push({ ...n.pending, role: 'parent' }); n.pending = null; }
-      n.user = { role: 'parent' }; n.route = 'setup';
-    });
+  const [err, setErr] = useState('');
+  const set = (k) => (v) => { setErr(''); setF({ ...f, [k]: v }); };
+  const ok = f.first && f.last && f.code.trim() && f.child && f.dob;
+  const submit = async (e) => {
+    e.preventDefault(); setTried(true); if (!ok || a.busy) return;
+    try {
+      await a.run(() => rpc('join_school', { p_code: f.code, p_first: f.first, p_last: f.last }));
+      await a.run(() => q(sb.from('children').insert({ parent_id: a.uid, name: f.child, dob: f.dob })), 'Welcome to Scata');
+      try { sessionStorage.removeItem('scata-code'); } catch (e) {}
+      await a.reload(); a.go('setup');
+    } catch (e) { setErr(e.message); }
   };
   return html`<main class="screen" style="padding-top:20px">
-    <div class="row"><button class="iconbtn" aria-label="Back" onClick=${() => go('choice')}>${I.back}</button><div class="grow"><${Logo} /></div><span style="width:40px"></span></div>
+    <div class="row"><button class="iconbtn" aria-label="Back" onClick=${() => a.go('choice')}>${I.back}</button><div class="grow"><${Logo} /></div><span style="width:40px"></span></div>
     <h2 class="title center">Fill in your information</h2>
     <form class="form" onSubmit=${submit} id="parent-form">
       <div class="grid2">
         <${Field} id="pi-first" label="First name" value=${f.first} onInput=${set('first')} err=${tried && !f.first && 'Enter your first name'} />
         <${Field} id="pi-last" label="Surname" value=${f.last} onInput=${set('last')} err=${tried && !f.last && 'Enter your surname'} />
       </div>
-      <${Field} id="pi-code" label="School code" value=${f.code} onInput=${set('code')} hint=${`From your school’s invite link. The demo school’s code is ${s.school.code}.`} err=${tried && !codeOk && `That code doesn’t match a school. The demo school’s code is ${s.school.code}.`} />
+      <${Field} id="pi-code" label="School code" value=${f.code} onInput=${set('code')} hint="From your school’s invite, e.g. sca1234" err=${(tried && !f.code.trim() && 'Enter your school’s code') || err} />
       <h3>Your child</h3>
       <div class="grid2">
         <${Field} id="pi-child" label="Child’s first name" value=${f.child} onInput=${set('child')} err=${tried && !f.child && 'Enter a name'} />
@@ -788,63 +794,64 @@ function ParentInfo({ s, update, go }) {
       </div>
       <p class="small muted">You can add more children later from your profile.</p>
     </form>
-    <div class="action"><button class="btn" type="submit" form="parent-form">Let’s Go!</button></div>
+    <div class="action"><button class="btn" type="submit" form="parent-form" disabled=${a.busy}>${a.busy ? 'Joining…' : 'Let’s Go!'}</button></div>
   </main>`;
 }
 
 /* ---------- school ---------- */
-function SchoolOverview({ s, go }) {
-  const fp = footprint(s.school.students);
+const inviteLink = (a) => `${SITE}?school=${a.school.code}`;
+
+function SchoolOverview({ a }) {
+  const fp = footprint(a.school.students);
+  const ms = mapState(a);
   return html`<main class="screen">
-    <div class="hello"><h1>Hi, ${s.school.first}!</h1></div>
+    <div class="hello"><h1>Hi, ${a.profile.first_name}!</h1></div>
     <div class="stack" style="gap:8px">
-      <div class="row"><span style="width:22px;color:var(--ink-2)">${I.bank}</span><span>${s.school.name}</span></div>
-      <div class="row"><span style="width:22px;color:var(--ink-2)">${I.pin}</span><span>${s.school.eircode}</span></div>
+      <div class="row"><span style="width:22px;color:var(--ink-2)">${I.bank}</span><span>${a.school.name}</span></div>
+      <div class="row"><span style="width:22px;color:var(--ink-2)">${I.pin}</span><span>${a.school.eircode}</span></div>
     </div>
-    <${SmartMap} s=${s} variant="catchment" label="Map of the area within 1 and 3 km of the school" />
-    <${MapLink} href=${gmPlace(s)}>Open the school in Google Maps<//>
-    <div class="card flat row" style="display:flex">${html`<span style="width:26px;flex:none">${I.info}</span>`}<span>On average the school commute for a school of ${s.school.students} students produces:</span></div>
+    <${SmartMap} s=${ms} variant="catchment" label="Map of the area within 1 and 3 km of the school" />
+    <div class="card flat row" style="display:flex"><span style="width:26px;flex:none">${I.info}</span><span>On average the school commute for a school of ${a.school.students} students produces:</span></div>
     <div class="card"><div class="stats">
       <div>${I.car}<span class="big" style="font-size:18px">${fmt(fp.trips)}</span><span class="lbl">car trips per month</span></div>
       <div>${I.co2}<span class="big" style="font-size:18px">${fmt(fp.co2)} kg</span><span class="lbl">of carbon</span></div>
       <div>${I.jam}<span class="big" style="font-size:18px">Gate</span><span class="lbl">congestion</span></div>
     </div></div>
-    <${Action} onClick=${() => go('invite')}>Let’s Go!<//>
+    <${Action} onClick=${() => a.go('invite')}>Invite parents<//>
   </main>`;
 }
 
-function InviteParents({ s, update, go, say }) {
-  const link = `scata.ie/${s.school.code}`;
+function InviteParents({ a }) {
+  const link = inviteLink(a);
   const [emails, setEmails] = useState('');
   const [err, setErr] = useState('');
-  const copy = () => { navigator.clipboard.writeText('https://' + link).then(() => say('Link copied'), () => { const el = document.getElementById('invite-link'); const r = document.createRange(); r.selectNodeContents(el); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); say('Link selected. Copy it from here.'); }); };
-  const add = (e) => {
+  const [mailto, setMailto] = useState('');
+  const copy = () => navigator.clipboard.writeText(link).then(() => a.say('Link copied'), () => { const el = document.getElementById('invite-link'); const r = document.createRange(); r.selectNodeContents(el); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); a.say('Link selected. Copy it from here.'); });
+  const add = async (e) => {
     e.preventDefault();
     const list = emails.split(/[\s,;]+/).filter(Boolean);
-    const bad = list.filter(x => !/^\S+@\S+\.\S+$/.test(x));
+    const bad = list.filter(x => !emailOk(x));
     if (!list.length) { setErr('Enter at least one email address'); return; }
     if (bad.length) { setErr(`Check ${bad.join(', ')}: that isn’t an email address`); return; }
-    update(n => list.forEach(email => { if (!n.parents.some(p => p.email === email)) n.parents.unshift({ id: uid(), name: email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), email, status: 'invited' }); }));
-    setEmails(''); setErr(''); say(`${list.length} invite${list.length > 1 ? 's' : ''} queued`);
+    await a.run(() => q(sb.from('school_invites').upsert(list.map(email => ({ school_id: a.school.id, email: email.toLowerCase() })), { onConflict: 'school_id,email', ignoreDuplicates: true })));
+    const body = `Hello,\n\n${a.school.name} is using Scata to help families share the school run safely.\n\nJoin here: ${link}\nOur school code is ${a.school.code}.\n\nThanks,\n${a.profile.first_name} ${a.profile.last_name}`;
+    setMailto(`mailto:?bcc=${encodeURIComponent(list.join(','))}&subject=${encodeURIComponent('Join ' + a.school.name + ' on Scata')}&body=${encodeURIComponent(body)}`);
+    setEmails(''); setErr(''); a.say(`${list.length} parent${list.length > 1 ? 's' : ''} added to your list`);
   };
-  const invited = s.parents.filter(p => p.status === 'invited').length;
   return html`<main class="screen">
-    <div class="hello"><h1>Invite your parents</h1><p>${s.school.name}</p></div>
+    <div class="hello"><h1>Invite your parents</h1><p>${a.school.name}</p></div>
     <div class="card">
       <h3>Share your school link</h3>
-      <p class="muted" style="margin:0">Send this link to parents by email, text or your school app. Parents use it to join your school on Scata.</p>
+      <p class="muted" style="margin:0">Send this link to parents by email, text or your school app. It takes them straight to sign-up with your school code (<b>${a.school.code}</b>) filled in.</p>
       <div class="copybox"><code id="invite-link">${link}</code><button class="btn green sm" onClick=${copy}>Copy</button></div>
     </div>
     <form class="card" onSubmit=${add}>
-      <h3>Or invite by email</h3>
+      <h3>Invite by email</h3>
       <${Field} id="inv-emails" label="Parent emails" value=${emails} onInput=${v => { setEmails(v); setErr(''); }} hint="Separate several addresses with commas" err=${err} />
-      <button class="btn" type="submit">Send invites</button>
-      <p class="demo-note" style="margin:0">Demo: invites are added to your parents list, no email is sent yet.</p>
+      <button class="btn" type="submit" disabled=${a.busy}>Add to my parents list</button>
+      ${mailto ? html`<a class="maplink" href=${mailto}>${I.mail}Open my email with the invite written</a><p class="demo-note" style="margin:0">This opens your own email app with the parents in BCC. Check it and press send.</p>` : ''}
     </form>
-    <div class="card flat row between" style="display:flex">
-      <span><b>${s.parents.length}</b> parents · <b>${invited}</b> waiting to join</span>
-      <button class="btn sm ghost" onClick=${() => go('schoolProfile')}>View list</button>
-    </div>
+    <${Action} onClick=${() => a.go('schoolProfile')}>View parents list<//>
   </main>`;
 }
 
@@ -856,42 +863,36 @@ function ProfileHero({ name, line1, line2, tabs }) {
   </div>`;
 }
 
-function SchoolProfile({ s, update, say }) {
+function SchoolProfile({ a }) {
   const [tab, setTab] = useState('parents');
   const [filter, setFilter] = useState('all');
-  const [q, setQ] = useState('');
+  const [q2, setQ] = useState('');
   const [page, setPage] = useState(0);
-  const [sel, setSel] = useState([]);
-  const [adding, setAdding] = useState(false);
-  const [np, setNp] = useState({ name: '', email: '' });
+  const [rows, setRows] = useState(null);
+  useEffect(() => { rpc('school_parents').then(setRows, e => { a.say(e.message); setRows([]); }); }, []);
   const per = 5;
-  const list = s.parents.filter(p => (filter === 'all' || p.status === 'active') && (p.name + p.email).toLowerCase().includes(q.toLowerCase()));
+  const list = (rows || []).filter(p => (filter === 'all' || p.status === 'active') && ((p.name || '') + p.email).toLowerCase().includes(q2.toLowerCase()));
   const pages = Math.max(1, Math.ceil(list.length / per));
   const pg = Math.min(page, pages - 1);
   const shown = list.slice(pg * per, pg * per + per);
-  const name = `${s.school.first} ${s.school.last}`;
+  const name = `${a.profile.first_name} ${a.profile.last_name}`;
   const tabs = html`<div class="tabs"><button class=${'tab' + (tab === 'profile' ? ' on' : '')} onClick=${() => setTab('profile')}>${I.idcard}Profile</button><button class=${'tab' + (tab === 'parents' ? ' on' : '')} onClick=${() => setTab('parents')}>${I.heart}Parents</button></div>`;
   return html`<main class="screen">
     <div><h2 class="title">School Profile</h2><div class="crumbs"><b>Dashboard</b>•<span>${tab === 'parents' ? 'Parents' : 'Profile'}</span></div></div>
-    <${ProfileHero} name=${name} line1=${s.school.name} line2="School manager" tabs=${tabs} />
+    <${ProfileHero} name=${name} line1=${a.school.name} line2="School manager" tabs=${tabs} />
     ${tab === 'profile' ? html`<div class="card">
-      ${[['Eircode', s.school.eircode], ['Students', s.school.students], ['Opening time', s.school.open], ['Closing time', s.school.close], ['School code', s.school.code]].map(([k, v]) => html`<div class="row between" style="display:flex"><span class="muted">${k}</span><b>${v}</b></div>`)}
+      ${[['Eircode', a.school.eircode], ['Students', a.school.students], ['Opening time', a.school.open_time], ['Closing time', a.school.close_time], ['School code', a.school.code], ['Email', a.session.user.email]].map(([k, v]) => html`<div class="row between" style="display:flex"><span class="muted">${k}</span><b style="overflow-wrap:anywhere;text-align:right">${v}</b></div>`)}
     </div>` : html`<div class="card">
-      <div><h3>Parents List</h3><p class="muted small" style="margin:4px 0 0">Manage and invite parents</p></div>
-      <div><button class="btn green" onClick=${() => setAdding(!adding)}>${I.plus}Add Parent</button></div>
-      ${adding ? html`<form class="form card flat" onSubmit=${e => { e.preventDefault(); if (!np.name || !/^\S+@\S+\.\S+$/.test(np.email)) { say('Enter a name and a valid email'); return; } update(n => n.parents.unshift({ id: uid(), ...np, status: 'invited' })); setNp({ name: '', email: '' }); setAdding(false); say(`${np.name} invited`); }}>
-        <${Field} id="np-name" label="Parent name" value=${np.name} onInput=${v => setNp({ ...np, name: v })} />
-        <${Field} id="np-email" label="Email" type="email" value=${np.email} onInput=${v => setNp({ ...np, email: v })} />
-        <button class="btn" type="submit">Invite parent</button>
-      </form>` : ''}
+      <div><h3>Parents List</h3><p class="muted small" style="margin:4px 0 0">Parents who joined, and emails you’ve invited</p></div>
+      <div><button class="btn green" onClick=${() => a.go('invite')}>${I.plus}Invite parents</button></div>
       <div class="table">
-        <div class="tabs" style="padding:0 12px;background:var(--surface)"><button class=${'tab' + (filter === 'all' ? ' on' : '')} onClick=${() => { setFilter('all'); setPage(0); }}>All</button><button class=${'tab' + (filter === 'active' ? ' on' : '')} onClick=${() => { setFilter('active'); setPage(0); }}>Active</button></div>
-        <div class="search">${I.search}<input id="parent-search" placeholder="Search…" aria-label="Search parents" value=${q} onInput=${e => { setQ(e.target.value); setPage(0); }} /></div>
-        <div class="trow thead"><input type="checkbox" aria-label="Select all on this page" checked=${shown.length && shown.every(p => sel.includes(p.id))} onChange=${e => setSel(e.target.checked ? [...new Set([...sel, ...shown.map(p => p.id)])] : sel.filter(id => !shown.some(p => p.id === id)))} /><span>Name</span><span>Status</span></div>
-        ${shown.map(p => html`<div class="trow"><input type="checkbox" aria-label=${'Select ' + p.name} checked=${sel.includes(p.id)} onChange=${e => setSel(e.target.checked ? [...sel, p.id] : sel.filter(x => x !== p.id))} /><span class="row" style="gap:10px"><${Avatar} name=${p.name} size="sm" /><span style="min-width:0;overflow-wrap:anywhere">${p.email}</span></span><span class=${'status ' + (p.status === 'active' ? 'accepted' : 'pending')}>${p.status === 'active' ? 'Active' : 'Invited'}</span></div>`)}
-        ${!shown.length ? html`<div class="trow"><span></span><span class="muted">No parents match “${q}”.</span><span></span></div>` : ''}
+        <div class="tabs" style="padding:0 12px;background:var(--surface)"><button class=${'tab' + (filter === 'all' ? ' on' : '')} onClick=${() => { setFilter('all'); setPage(0); }}>All</button><button class=${'tab' + (filter === 'active' ? ' on' : '')} onClick=${() => { setFilter('active'); setPage(0); }}>Joined</button></div>
+        <div class="search">${I.search}<input id="parent-search" placeholder="Search…" aria-label="Search parents" value=${q2} onInput=${e => { setQ(e.target.value); setPage(0); }} /></div>
+        <div class="trow thead" style="grid-template-columns:1fr auto"><span>Parent</span><span>Status</span></div>
+        ${rows === null ? html`<div class="trow" style="grid-template-columns:1fr"><span class="muted">Loading…</span></div>` : ''}
+        ${shown.map(p => html`<div class="trow" style="grid-template-columns:1fr auto"><span class="row" style="gap:10px"><${Avatar} name=${p.name || p.email} size="sm" /><span style="min-width:0;overflow-wrap:anywhere">${p.name ? html`<b>${p.name}</b><br/>` : ''}<span class="small muted">${p.email}</span></span></span><span class=${'status ' + (p.status === 'active' ? 'accepted' : 'pending')}>${p.status === 'active' ? 'Joined' : 'Invited'}</span></div>`)}
+        ${rows && !shown.length ? html`<div class="trow" style="grid-template-columns:1fr"><span class="muted">${rows.length ? `No parents match “${q2}”.` : 'No parents yet. Share your school link to invite them.'}</span></div>` : ''}
         <div class="tfoot">
-          ${sel.length ? html`<button class="pill out" onClick=${() => { update(n => { n.parents = n.parents.filter(p => !sel.includes(p.id)); }); say(`Removed ${sel.length} parent${sel.length > 1 ? 's' : ''}`); setSel([]); }}>Remove ${sel.length}</button>` : ''}
           <span>${list.length ? `${pg * per + 1}-${Math.min(list.length, pg * per + per)} of ${list.length}` : '0 of 0'}</span>
           <button class="iconbtn" style="width:32px;height:32px" aria-label="Previous page" disabled=${pg === 0} onClick=${() => setPage(pg - 1)}>${I.chevL}</button>
           <button class="iconbtn" style="width:32px;height:32px" aria-label="Next page" disabled=${pg >= pages - 1} onClick=${() => setPage(pg + 1)}>${I.chevR}</button>
@@ -901,33 +902,48 @@ function SchoolProfile({ s, update, say }) {
   </main>`;
 }
 
-function Reports({ s }) {
-  const active = s.parents.filter(p => p.status === 'active').length;
+function Reports({ a }) {
+  const [st, setSt] = useState(null);
+  useEffect(() => { rpc('school_stats').then(r => setSt(r[0] || null), e => a.say(e.message)); }, []);
+  if (!st) return html`<main class="screen"><div><h2 class="title">School Reports</h2></div><p class="muted">Loading…</p></main>`;
+  const est = ['walk', 'bike', 'bus'].reduce((acc, m) => { const sv = savings(m, 1); return { eur: acc.eur + sv.eur * st[m], co2: acc.co2 + sv.co2 * st[m], hrs: acc.hrs }; }, { eur: 0, co2: 0, hrs: 0 });
+  const car = savings('car', 3);
+  const total = { eur: est.eur + car.eur * st.car, co2: est.co2 + car.co2 * st.car, hrs: car.hrs * st.car };
+  const modes = [['car', 'Car', 'var(--green)'], ['bike', 'Bike', 'var(--amber)'], ['bus', 'Public', 'var(--blue)'], ['walk', 'Walk', 'var(--red)']];
+  const anyTrips = Number(st.commutes) > 0;
   return html`<main class="screen">
     <div><h2 class="title">School Reports</h2><div class="crumbs"><b>Dashboard</b>•<span>Reports</span></div></div>
-    <div class="card"><${Stats} s=${{ eur: active * 910, co2: active * 228, hrs: active * 10 }} labels=${['saved this year', 'saved this year', 'saved this year']} /><p class="small muted center" style="margin:0">${active} active families sharing the commute</p></div>
+    <div class="card"><div class="stats">
+      <div>${I.parent}<span class="big">${st.parents}</span><span class="lbl">parents joined</span></div>
+      <div>${I.route}<span class="big">${st.commutes}</span><span class="lbl">commutes set up</span></div>
+      <div>${I.car}<span class="big">${st.groups}</span><span class="lbl">sharing groups</span></div>
+    </div></div>
+    <div class="card"><h3>Estimated yearly savings</h3><${Stats} s=${total} labels=${['a year', 'CO₂ a year', 'parent time']} /><p class="demo-note" style="margin:0">Estimate from each family’s chosen travel mode, 10 km round trip, 183 school days.</p></div>
     <div class="card">
-      <div><h3>Saved statistics</h3><p class="muted small" style="margin:2px 0 0">(+43%) than last year</p></div>
-      <div class="legend"><span><i style="background:var(--green)"></i>CO₂</span><span><i style="background:var(--amber)"></i>Euro</span><span><i style="background:var(--blue)"></i>Time</span></div>
-      <${ReportChart} />
+      <h3>Commutes by travel type</h3>
+      ${anyTrips ? html`<${Pie} data=${modes.filter(([k]) => Number(st[k]) > 0).map(([k, , c]) => ({ v: Number(st[k]), c }))} />
+      <div class="legend">${modes.map(([k, l, c]) => html`<span><i style=${'background:' + c}></i>${l} (${st[k]})</span>`)}</div>` : html`<p class="muted" style="margin:0">This fills in once parents set up their commutes.</p>`}
     </div>
-    <div class="card">
-      <h3>Trips by commute type</h3>
-      <${Pie} data=${[{ v: 40, c: 'var(--green)' }, { v: 15, c: 'var(--amber)' }, { v: 35, c: 'var(--blue)' }, { v: 10, c: 'var(--red)' }]} />
-      <div class="legend"><span><i style="background:var(--green)"></i>Car</span><span><i style="background:var(--amber)"></i>Bike</span><span><i style="background:var(--blue)"></i>Public</span><span><i style="background:var(--red)"></i>Walk</span></div>
-    </div>
-    <p class="demo-note">Charts show example figures until real trips are logged.</p>
+    <p class="demo-note">Monthly trends will appear here once trips are being logged.</p>
   </main>`;
 }
 
 /* ---------- parent ---------- */
-function Hello({ s }) { return html`<div class="hello"><h1>Hi, ${s.parent.first}!</h1><p>${s.school.name}</p></div>`; }
+function Hello({ a }) { return html`<div class="hello"><h1>Hi, ${a.profile.first_name}!</h1><p>${a.school ? a.school.name : ''}</p></div>`; }
 
-function Setup({ s, update, go }) {
-  const c = s.commute;
-  const set = (k, v) => update(n => { n.commute[k] = v; });
+function Setup({ a }) {
+  const [c, setC] = useState({ ...a.commute });
+  const set = (k, v) => setC({ ...c, [k]: v });
+  const save = async () => {
+    const changedHome = c.home !== a.commute.home || a.commute.lat == null;
+    const pos = changedHome && c.home ? await geocode(c.home + ', Ireland') : null;
+    const patch = { home: c.home, mode: c.mode, seats: c.seats, drop_time: c.drop_time, pick_time: c.pick_time, updated_at: new Date().toISOString(), ...(pos ? { lat: pos.lat, lng: pos.lng } : {}) };
+    await a.run(() => q(sb.from('commutes').update(patch).eq('parent_id', a.uid)));
+    if (changedHome && c.home && !pos) a.say('We couldn’t find that address on the map. Try adding the Eircode.');
+    await a.reload(); a.go('match');
+  };
   return html`<main class="screen">
-    <${Hello} s=${s} />
+    <${Hello} a=${a} />
     <div class="card" style="gap:18px">
       <h3 class="center">Before we reach out, we need to know a little bit more about your commute</h3>
       <div class="stack"><span class="center">How do you plan on sharing your commute?</span>
@@ -936,308 +952,418 @@ function Setup({ s, update, go }) {
       <div class="stack"><span class="center">How many children can you add to your commute?</span>
         <div class="choice">${[1, 2, 3, 4].map(k => html`<button class=${'seat' + (c.seats === k ? ' on' : '')} aria-pressed=${c.seats === k} aria-label=${k + ' children'} onClick=${() => set('seats', k)}>${k}</button>`)}</div>
       </div>
-      <div class="stack" style="gap:18px"><span class="center">What time is the drop off and pick up?</span>
-        <${Field} id="su-home" label="Home Eircode or address" value=${c.home || ''} onInput=${v => set('home', v)} hint="Used to plan your route to school in Google Maps" />
-        <${Field} id="su-drop" label="Drop off time" value=${c.drop} onInput=${v => set('drop', v)} />
-        <${Field} id="su-pick" label="Pick up time" value=${c.pick} onInput=${v => set('pick', v)} />
+      <div class="stack" style="gap:18px"><span class="center">Where do you leave from, and when?</span>
+        <${Field} id="su-home" label="Home Eircode or address" value=${c.home || ''} onInput=${v => set('home', v)} hint="Only used to find families near you. Other parents never see it." />
+        <${Field} id="su-drop" label="Drop off time" value=${c.drop_time} onInput=${v => set('drop_time', v)} />
+        <${Field} id="su-pick" label="Pick up time" value=${c.pick_time} onInput=${v => set('pick_time', v)} />
       </div>
     </div>
-    <${Action} onClick=${() => go('match')}>Let’s Go!<//>
+    <div class="action"><button class="btn" disabled=${a.busy || !c.home} onClick=${save}>${a.busy ? 'Saving…' : 'Let’s Go!'}</button></div>
   </main>`;
 }
 
-function Match({ s, update, go }) {
-  const [mode, setMode] = useState(s.commute.mode);
+function useNearby(a) {
+  const [list, setList] = useState(null);
+  const refresh = () => rpc('nearby_parents').then(setList, e => { a.say(e.message); setList([]); });
+  useEffect(() => { refresh(); }, [a.groups && a.groups.length, JSON.stringify(a.people || {})]);
+  return [list, refresh];
+}
+
+function Match({ a }) {
+  const [mode, setMode] = useState(a.commute.mode);
   const [info, setInfo] = useState(null);
-  const nearby = s.families.reduce((a, f) => a + f.kids, 0);
-  const sv = savings(mode, Math.min(s.commute.seats, s.families.length) + 1);
+  const [nearby] = useNearby(a);
+  const close = (nearby || []).filter(n => n.km == null || n.km <= 5);
+  const kids = close.reduce((s, n) => s + Number(n.kids || 0), 0);
+  const sv = savings(mode, Math.min(a.commute.seats, close.length) + 1);
+  const ms = { ...mapState(a), commute: { ...mapState(a).commute, mode } };
   return html`<main class="screen">
-    <${Hello} s=${s} />
-    <div class="map-wrap"><${SmartMap} s=${s} variant="route" mode=${mode} onInfo=${setInfo} /><div class="km">${info ? info.km : 10}<small>km</small></div></div>
-    <${MapLink} href=${gmDirections(s, mode)}>See your ${{ walk: 'walking', bike: 'cycling', car: 'driving', bus: 'bus' }[mode]} route in Google Maps<//>
+    <${Hello} a=${a} />
+    <div class="map-wrap"><${SmartMap} s=${ms} variant="trip" mode=${mode} onInfo=${setInfo} />${info ? html`<div class="km">${info.km}<small>km</small></div>` : ''}</div>
     <div class="card tint center" style="gap:14px">
-      <p style="margin:0;font-size:16px">There are <b>${nearby}</b> children within 5 min of your location travelling to your school every day.</p>
+      <p style="margin:0;font-size:16px">${nearby === null ? 'Looking for families near you…' : close.length ? html`There ${close.length === 1 ? 'is' : 'are'} <b>${close.length}</b> ${close.length === 1 ? 'family' : 'families'} (${kids} ${kids === 1 ? 'child' : 'children'}) within 5 km going to your school.` : 'No other families at your school have set up a commute yet. You can still set yours up now, and we’ll show them here as they join.'}</p>
       <p style="margin:0"><b>${MODE_NAME[mode]}</b> together could save you up to</p>
       <div class="choice">${['walk', 'bike', 'car', 'bus'].map(m => html`<button class=${'mode' + (mode === m ? ' on' : '')} aria-pressed=${mode === m} aria-label=${MODE_NAME[m]} onClick=${() => setMode(m)}>${MODE_ICON[m]}</button>`)}</div>
       <${Stats} s=${sv} labels=${['a year', 'CO₂ a year', 'a year']} />
       <p class="demo-note" style="margin:0">Estimate: 10 km round trip, 183 school days.</p>
     </div>
-    <${Action} onClick=${() => { update(n => { n.commute.mode = mode; }); go('terms'); }}>Let’s Go!<//>
+    <div class="action"><button class="btn" disabled=${a.busy} onClick=${async () => { if (mode !== a.commute.mode) await a.run(() => q(sb.from('commutes').update({ mode }).eq('parent_id', a.uid))); await a.reload(); a.go(a.commute.accepted_terms ? 'manage' : 'terms'); }}>Let’s Go!</button></div>
   </main>`;
 }
 
-function Terms({ s, update, go }) {
-  const [ok, setOk] = useState(s.commute.accepted);
-  const car = s.commute.mode === 'car';
+function Terms({ a }) {
+  const [ok, setOk] = useState(a.commute.accepted_terms);
+  const car = a.commute.mode === 'car';
   const items = [
     [I.parent, 'You will always travel with your child.'],
     ...(car ? [[I.car, 'You confirm that your car is fit for purpose.'], [I.shield, 'You confirm that your vehicle is insured, and you have a full driving licence.']] : [[I.shield, 'You confirm that you will supervise the children in your group for the whole journey.']]),
     [I.heart, `By ticking below you agree that you are electing to ${car ? 'carpool' : 'share the commute'} with other parents.`],
   ];
   return html`<main class="screen">
-    <${Hello} s=${s} />
+    <${Hello} a=${a} />
     <div class="card" style="gap:18px">
       <h3 class="center">Safety is our Priority</h3>
       ${items.map(([ico, t]) => html`<div class="feature" style="gap:14px"><span style="width:36px;height:36px;border-radius:50%;background:var(--blue-soft);color:var(--blue);display:grid;place-items:center;flex:none">${ico}</span><span>${t}</span></div>`)}
     </div>
     <label class="check" for="terms-ok"><input id="terms-ok" type="checkbox" checked=${ok} onChange=${e => setOk(e.target.checked)} />Please accept to build this commute</label>
-    <${Action} disabled=${!ok} onClick=${() => { update(n => { n.commute.accepted = true; }); go('manage'); }}>Let’s Go!<//>
+    <div class="action"><button class="btn" disabled=${!ok || a.busy} onClick=${async () => { await a.run(() => q(sb.from('commutes').update({ accepted_terms: true }).eq('parent_id', a.uid))); await a.reload(); a.go('manage'); }}>Let’s Go!</button></div>
   </main>`;
 }
 
-function Manage({ s, update, go, say }) {
-  const accepted = s.families.filter(f => f.status === 'accepted');
-  const kidsIn = accepted.reduce((a, f) => a + f.kids, 0);
-  const capacity = s.commute.seats + 1;
-  const used = Math.min(capacity, kidsIn + 1);
-  const left = Math.max(0, capacity - used);
-  const sv = savings(s.commute.mode, accepted.length + 1);
-  const invite = (f) => {
-    update(n => { const x = n.families.find(y => y.id === f.id); x.status = 'pending'; n.events.push({ at: Date.now() + 4000 + Math.random() * 3000, type: 'invite', fam: f.id }); });
-    say(`Invite sent to ${f.name}`);
-  };
+function PendingInvites({ a }) {
+  const pending = (a.groups || []).filter(g => !g.mine && g.status === 'pending');
+  if (!pending.length) return '';
+  return html`${pending.map(g => { const owner = (a.people[g.id] || []).find(p => p.is_owner) || { first_name: 'A parent', last_name: '' };
+    return html`<div class="card" style="background:var(--green-soft);border-color:transparent">
+      <div class="row"><${Avatar} name=${owner.first_name + ' ' + owner.last_name} /><div class="grow"><b>${owner.first_name} ${owner.last_name}</b> invited you to share the school commute.</div></div>
+      <div class="row" style="gap:8px"><button class="btn green" disabled=${a.busy} onClick=${async () => { await a.run(() => rpc('respond_invite', { p_group: g.id, p_accept: true }), 'You joined the commute'); await a.reload(); }}>Accept</button><button class="btn sm ghost" disabled=${a.busy} onClick=${async () => { await a.run(() => rpc('respond_invite', { p_group: g.id, p_accept: false }), 'Invitation declined'); await a.reload(); }}>Decline</button></div>
+    </div>`; })}`;
+}
+
+function GroupPicker({ a }) {
+  const usable = (a.groups || []).filter(g => g.status === 'accepted');
+  if (usable.length < 2) return '';
+  const label = (g) => g.mine ? 'My commute' : `${((a.people[g.id] || []).find(p => p.is_owner) || {}).first_name || 'A parent'}’s commute`;
+  return html`<div class="field"><label for="grp">Commute</label><select id="grp" onChange=${e => a.setGid(e.target.value)}>${usable.map(g => html`<option value=${g.id} selected=${g.id === a.gid}>${label(g)}</option>`)}</select></div>`;
+}
+
+function Manage({ a }) {
+  const [nearby, refresh] = useNearby(a);
+  const myGroup = (a.groups || []).find(g => g.mine);
+  const members = myGroup ? (a.people[myGroup.id] || []).filter(p => !p.is_owner) : [];
+  const accepted = members.filter(m => m.status === 'accepted');
+  const capacity = a.commute.seats + 1;
+  const kidsIn = accepted.reduce((s, m) => s + Number(m.kids || 0), 0) + (a.children || []).length;
+  const left = Math.max(0, capacity - kidsIn);
+  const inOther = (a.groups || []).filter(g => !g.mine && g.status === 'accepted');
+  const sv = savings(a.commute.mode, Math.max(accepted.length, inOther.length ? (a.people[inOther[0].id] || []).filter(p => p.status === 'accepted').length - 1 : 0) + 1);
+  const invite = async (n) => { await a.run(() => rpc('invite_parent', { p_target: n.parent_id }), `Invite sent to ${n.first_name}`); await a.reload(); refresh(); };
+  const canRota = a.gid != null && (a.people[a.gid] || []).filter(p => p.status === 'accepted').length > 1;
   return html`<main class="screen">
-    <${Hello} s=${s} />
+    <${Hello} a=${a} />
+    <${PendingInvites} a=${a} />
     <div class="card center">
       <h3>Invite parents in your area</h3>
-      <span class="muted small">Trip capacity: <b>${used}/${capacity}</b></span>
+      <span class="muted small">Trip capacity: <b>${Math.min(capacity, kidsIn)}/${capacity}</b></span>
       <span class="muted small">${left ? `You can add ${left} more ${left === 1 ? 'child' : 'children'}` : 'Your commute is full'}</span>
     </div>
-    ${s.families.map(f => html`<div class="person">
-      <${Avatar} name=${f.name} />
-      <div class="grow"><b>${f.name}</b><div class="muted small">${f.kids} ${f.kids === 1 ? 'child' : 'children'} · ${f.mins} min away</div></div>
-      ${f.status === 'none' ? html`<button class="btn sm ghost" onClick=${() => invite(f)}>Invite</button>`
-        : html`<span class=${'status ' + f.status}>${f.status === 'accepted' ? '✓ Accepted' : f.status === 'pending' ? 'Pending' : 'Declined'}</span>`}
+    ${nearby === null ? html`<p class="muted center">Looking for families near you…</p>` : ''}
+    ${nearby && !nearby.length ? html`<div class="card note"><p style="margin:0">No other families at ${a.school.name} have set up a commute yet. Ask your school to share the Scata link, and they’ll appear here.</p></div>` : ''}
+    ${(nearby || []).map(n => html`<div class="person">
+      <${Avatar} name=${n.first_name} />
+      <div class="grow"><b>${n.first_name}</b><div class="muted small">${n.kids} ${Number(n.kids) === 1 ? 'child' : 'children'}${n.km != null ? ` · ${n.km} km away` : ''} · ${MODE_NAME[n.mode]}</div></div>
+      ${n.status === 'none' ? html`<button class="btn sm ghost" disabled=${a.busy} onClick=${() => invite(n)}>Invite</button>`
+        : n.status === 'declined' ? html`<span class="row" style="gap:6px"><span class="status declined">Declined</span><button class="pill out" disabled=${a.busy} onClick=${() => invite(n)}>Ask again</button></span>`
+        : html`<span class=${'status ' + n.status}>${n.status === 'accepted' ? '✓ Accepted' : 'Pending'}</span>`}
     </div>`)}
-    <div class="center stack" style="gap:4px"><h3>Build this commute?</h3><span class="muted">Sharing this commute with ${accepted.length} ${accepted.length === 1 ? 'family' : 'families'} could save you each year:</span></div>
+    ${inOther.length ? html`<div class="card flat"><span>You’re also in ${inOther.map(g => ((a.people[g.id] || []).find(p => p.is_owner) || {}).first_name).join(' and ')}’s commute.</span></div>` : ''}
+    <div class="center stack" style="gap:4px"><h3>Build this commute?</h3><span class="muted">Sharing the school run could save you each year:</span></div>
     <div class="card"><${Stats} s=${sv} /></div>
-    <${Action} disabled=${!accepted.length} onClick=${() => { update(n => { n.rota = buildRota(n); n.weekOffset = 0; }); go('calendar'); }}>${s.rota ? 'Rebuild rota' : 'Let’s Go!'}<//>
+    <${Action} disabled=${!canRota} onClick=${() => a.go('calendar')}>${canRota ? 'See the rota' : 'Waiting for a family to accept'}<//>
   </main>`;
 }
 
-function mondayOf(offset) {
-  const d = new Date(); d.setHours(12, 0, 0, 0);
-  const day = d.getDay(); const diff = day === 0 ? 1 : day === 6 ? 2 : 1 - day;
-  d.setDate(d.getDate() + diff + offset * 7); return d;
+function useRota(a, offset) {
+  const [slots, setSlots] = useState(null);
+  const [err, setErr] = useState('');
+  const mon = mondayOf(offset);
+  const load = async () => {
+    if (!a.gid) { setSlots([]); return; }
+    setErr('');
+    try {
+      if (offset < 0) setSlots(await q(sb.from('rota_slots').select('*').eq('group_id', a.gid).eq('week_start', isoDate(mon)).order('day').order('kind')));
+      else setSlots(await rpc('build_rota', { p_group: a.gid, p_week: isoDate(mon) }));
+    } catch (e) { setErr(e.message); setSlots([]); }
+  };
+  useEffect(() => { load(); }, [a.gid, offset]);
+  useEffect(() => {
+    if (!a.gid) return;
+    const ch = sb.channel('rota-' + a.gid + offset).on('postgres_changes', { event: '*', schema: 'public', table: 'rota_slots', filter: `group_id=eq.${a.gid}` }, () => load()).subscribe();
+    return () => { sb.removeChannel(ch); };
+  }, [a.gid, offset]);
+  return { slots, err, mon, load };
 }
-function weekNo(d) { const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); const n = t.getUTCDay() || 7; t.setUTCDate(t.getUTCDate() + 4 - n); const y = new Date(Date.UTC(t.getUTCFullYear(), 0, 1)); return Math.ceil(((t - y) / 864e5 + 1) / 7); }
 
-function Calendar({ s, update, go, say }) {
+function SwapRequests({ a, onDone }) {
+  const [reqs, setReqs] = useState([]);
+  const load = () => q(sb.from('swap_requests').select('*').eq('status', 'pending').eq('responder', a.uid)).then(setReqs, () => {});
+  useEffect(() => { load(); }, [a.notifications && a.notifications.length]);
+  const name = (id) => { for (const g of Object.values(a.people || {})) { const p = g.find(x => x.parent_id === id); if (p) return p.first_name; } return 'A parent'; };
+  return html`${reqs.map(r => html`<div class="card" style="background:var(--surface)">
+    <span><b>${name(r.requester)}</b> asked to swap a slot with you. Check the notification for the details.</span>
+    <div class="row" style="gap:8px"><button class="btn green" disabled=${a.busy} onClick=${async () => { await a.run(() => rpc('respond_swap', { p_swap: r.id, p_accept: true }), 'Swap agreed'); load(); onDone(); }}>Agree</button><button class="btn sm ghost" disabled=${a.busy} onClick=${async () => { await a.run(() => rpc('respond_swap', { p_swap: r.id, p_accept: false }), 'Swap declined'); load(); onDone(); }}>Can’t do it</button></div>
+  </div>`)}`;
+}
+
+function Calendar({ a }) {
+  const [offset, setOffset] = useState(0);
   const [swapFrom, setSwapFrom] = useState(null);
-  if (!s.rota) return html`<main class="screen"><${Hello} s=${s} /><div class="card note"><h3>No rota yet</h3><p style="margin:0">Invite at least one family and build your commute to get a rota.</p></div><${Action} onClick=${() => go('manage')}>Invite families<//></main>`;
-  const fam = (id) => id === 'me' ? { name: 'You' } : s.families.find(f => f.id === id) || { name: '?' };
-  const members = 1 + s.families.filter(f => f.status === 'accepted').length;
-  const mon = mondayOf(s.weekOffset);
-  const dayDate = (i) => { const d = new Date(mon); d.setDate(d.getDate() + i); return d; };
-  const times = { drop: s.commute.drop, pick: s.commute.pick };
-  const per = (10 / members);
-  const label = (slot) => `${DAYS[slot.day]} ${slot.kind === 'drop' ? 'drop-off' : 'pick-up'}`;
-  const tapSlot = (slot) => {
-    if (!swapFrom) return;
+  const { slots, err, mon, load } = useRota(a, offset);
+  if (!a.gid) return html`<main class="screen"><${Hello} a=${a} /><div class="card note"><h3>No rota yet</h3><p style="margin:0">Once a family accepts your invite, or you accept theirs, your rota appears here.</p></div><${Action} onClick=${() => a.go('manage')}>Invite families<//></main>`;
+  const people = a.people[a.gid] || [];
+  const who = (id) => id === a.uid ? 'You' : ((people.find(p => p.parent_id === id) || {}).first_name || 'A parent');
+  const members = people.filter(p => p.status === 'accepted').length;
+  const per = members ? 10 / members : 0;
+  const dayDate = (i) => { const x = new Date(mon); x.setDate(x.getDate() + i); return x; };
+  const times = { drop: a.commute.drop_time, pick: a.commute.pick_time };
+  const past = offset < 0;
+  const tapSlot = async (slot) => {
+    if (!swapFrom || past) return;
     if (slot.id === swapFrom) { setSwapFrom(null); return; }
-    const a = s.rota.find(x => x.id === swapFrom);
-    if (slot.who === 'me') { say('Pick a slot that another parent is doing'); return; }
-    const other = slot.who;
-    update(n => { const A = n.rota.find(x => x.id === a.id), B = n.rota.find(x => x.id === slot.id); A.who = other; B.who = 'me'; A.confirmed = false; B.confirmed = false; n.events.push({ at: Date.now() + 3500, type: 'swap', fam: other, slot: B.id, label: label(B) }); n.events.push({ at: Date.now() + 3600, type: 'update', fam: other, slot: A.id, label: label(A) }); });
-    setSwapFrom(null); say(`Swap request sent to ${fam(other).name}`);
+    if (slot.parent_id === a.uid) { a.say('Pick a slot that another parent is doing'); return; }
+    await a.run(() => rpc('request_swap', { p_give: swapFrom, p_take: slot.id }), `Swap request sent to ${who(slot.parent_id)}`);
+    setSwapFrom(null);
   };
   return html`<main class="screen">
+    <${GroupPicker} a=${a} />
+    <${SwapRequests} a=${a} onDone=${load} />
     <div class="card note"><h3>Trip overview</h3><p style="margin:0">${members} families, 5 days: that’s ${per % 1 ? per.toFixed(1) : per} trips each!</p></div>
-    ${swapFrom ? html`<div class="card flat" style="background:var(--surface)"><span><b>Swapping ${label(s.rota.find(x => x.id === swapFrom))}.</b> Tap the slot you’d like instead.</span><button class="btn sm ghost" onClick=${() => setSwapFrom(null)}>Cancel swap</button></div>` : ''}
+    ${swapFrom ? html`<div class="card flat" style="background:var(--surface)"><span><b>Swapping your ${slotLabel(slots.find(x => x.id === swapFrom))}.</b> Tap the slot you’d like instead.</span><button class="btn sm ghost" onClick=${() => setSwapFrom(null)}>Cancel swap</button></div>` : ''}
     <div class="card" style="padding:0;gap:0;overflow:hidden">
       <div style="padding:14px 16px"><h3>Calendar</h3></div>
       <div class="cal-nav" style="padding:6px 8px 12px">
-        <button class="iconbtn" aria-label="Previous week" onClick=${() => update(n => { n.weekOffset--; })}>${I.chevL}</button>
+        <button class="iconbtn" aria-label="Previous week" onClick=${() => { setSwapFrom(null); setOffset(offset - 1); }}>${I.chevL}</button>
         <span>${mon.toLocaleDateString('en-IE', { month: 'long', year: 'numeric' })}, Week ${weekNo(mon)}</span>
-        <button class="iconbtn" aria-label="Next week" onClick=${() => update(n => { n.weekOffset++; })}>${I.chevR}</button>
+        <button class="iconbtn" aria-label="Next week" onClick=${() => { setSwapFrom(null); setOffset(offset + 1); }}>${I.chevR}</button>
       </div>
-      ${DAYS.map((d, i) => html`<div class="cal-day">
-        <div class="cal-head"><span>${d}</span><span>${dayDate(i).toLocaleDateString('en-IE', { month: 'long', day: 'numeric', year: 'numeric' })}</span></div>
-        ${s.rota.filter(x => x.day === i).map(slot => { const mine = slot.who === 'me';
+      ${err ? html`<p class="muted" style="padding:0 16px 16px;margin:0">${err}</p>` : ''}
+      ${slots === null ? html`<p class="muted" style="padding:0 16px 16px;margin:0">Loading…</p>` : ''}
+      ${slots && !slots.length && !err ? html`<p class="muted" style="padding:0 16px 16px;margin:0">No rota for this week.</p>` : ''}
+      ${slots && slots.length ? DAYS.map((dn, i) => html`<div class="cal-day">
+        <div class="cal-head"><span>${dn}</span><span>${dayDate(i).toLocaleDateString('en-IE', { month: 'long', day: 'numeric' })}</span></div>
+        ${slots.filter(x => x.day === i).sort((x, y) => x.kind < y.kind ? -1 : 1).map(slot => { const mine = slot.parent_id === a.uid;
           return html`<div class=${'cal-slot' + (mine ? ' mine' : '') + (swapFrom && !mine ? ' picking' : '')} onClick=${() => tapSlot(slot)}>
-            <div class="cal-who"><span class="small" style="min-width:92px">${times[slot.kind]}</span><span class=${'dot' + (slot.confirmed ? '' : ' amber')}></span><span>${fam(slot.who).name}</span></div>
-            <div class="row" style="gap:6px">${mine ? html`
-              ${slot.confirmed ? html`<span class="status accepted small">Confirmed</span>` : html`<button class="pill" onClick=${e => { e.stopPropagation(); update(n => { n.rota.find(x => x.id === slot.id).confirmed = true; }); say('Slot confirmed'); }}>Confirm</button>`}
+            <div class="cal-who"><span class="small" style="min-width:92px">${times[slot.kind]}</span><span class=${'dot' + (slot.confirmed ? '' : ' amber')}></span><span>${who(slot.parent_id)}</span></div>
+            ${past ? '' : html`<div class="row" style="gap:6px">${mine ? html`
+              ${slot.confirmed ? html`<span class="status accepted small">Confirmed</span>` : html`<button class="pill" onClick=${async e => { e.stopPropagation(); await a.run(() => rpc('confirm_slot', { p_slot: slot.id }), 'Slot confirmed'); load(); }}>Confirm</button>`}
               <button class="pill violet" onClick=${e => { e.stopPropagation(); setSwapFrom(slot.id); }}>Swap</button>`
-              : !slot.confirmed ? html`<button class="pill out" onClick=${e => { e.stopPropagation(); if (swapFrom) { tapSlot(slot); return; } update(n => { n.events.push({ at: Date.now() + 3000, type: 'update', fam: slot.who, slot: slot.id, label: label(slot) }); }); say(`Asked ${fam(slot.who).name} to confirm`); }}>Request update</button>` : ''}</div>
+              : !slot.confirmed && !swapFrom ? html`<button class="pill out" onClick=${async e => { e.stopPropagation(); await a.run(() => rpc('nudge_slot', { p_slot: slot.id }), `Asked ${who(slot.parent_id)} to confirm`); }}>Request update</button>` : ''}</div>`}
           </div>`; })}
-      </div>`)}
+      </div>`) : ''}
     </div>
     <div class="card note">
-      <p style="margin:0">We have generated a <b>random allocation</b>. As there isn’t always an even number of trips, we will propose a new allocation in 4 weeks.</p>
+      <p style="margin:0">We share the trips out in turn. When the numbers don’t divide evenly, the extra trips move to a different family each week.</p>
       <p style="margin:0">Tap <b>Confirm</b> on your slot. If a slot doesn’t work for you, tap <b>Swap</b> and pick another parent’s slot. Once they agree, both slots are confirmed.</p>
       <div class="row" style="justify-content:center;gap:16px;font-size:13px"><span class="row" style="gap:6px"><span class="dot"></span>Confirmed</span><span class="row" style="gap:6px"><span class="dot amber"></span>Waiting</span></div>
     </div>
-    <${Action} onClick=${() => go('trip')}>Let’s Go!<//>
+    ${(a.groups || []).some(g => g.mine && g.id === a.gid) && !past ? html`<button class="btn ghost" disabled=${a.busy} onClick=${async () => { await a.run(() => rpc('rebuild_rota', { p_group: a.gid, p_week: isoDate(mon) }), 'Rota rebuilt for this week'); load(); }}>Rebuild this week’s rota</button>` : ''}
+    <${Action} onClick=${() => a.go('trip')}>Next school trip<//>
   </main>`;
 }
 
-function nextTrip(s) {
-  if (!s.rota) return null;
-  const now = new Date(); let day = now.getDay() - 1; // 0 = Monday
-  let kind = now.getHours() < 9 ? 'drop' : now.getHours() < 14 ? 'pick' : 'drop';
-  if (now.getHours() >= 14) day += 1;
-  if (day < 0 || day > 4) { day = 0; kind = 'drop'; }
-  return s.rota.find(x => x.day === day && x.kind === kind);
+function useNextTrip(a) {
+  const [trip, setTrip] = useState(undefined);
+  useEffect(() => {
+    if (!a.gid) { setTrip(null); return; }
+    (async () => {
+      const now = new Date();
+      const today = (now.getDay() + 6) % 7; // 0 = Monday
+      const kindNow = now.getHours() < 10 ? 'drop' : now.getHours() < 15 ? 'pick' : null;
+      for (const off of [0, 1]) {
+        let slots;
+        try { slots = await rpc('build_rota', { p_group: a.gid, p_week: isoDate(mondayOf(off)) }); } catch (e) { setTrip(null); return; }
+        const order = (s) => s.day * 2 + (s.kind === 'pick' ? 1 : 0);
+        const fromIdx = off > 0 ? -1 : today > 4 ? 99 : today * 2 + (kindNow === 'drop' ? 0 : kindNow === 'pick' ? 1 : 2) - 1;
+        const next = slots.filter(s => order(s) > fromIdx).sort((x, y) => order(x) - order(y))[0];
+        if (next) { setTrip({ ...next, weekOffset: off }); return; }
+      }
+      setTrip(null);
+    })();
+  }, [a.gid]);
+  return trip;
 }
 
-function NextTrip({ s, go }) {
+function NextTrip({ a }) {
   const [info, setInfo] = useState(null);
-  const slot = nextTrip(s);
-  if (!slot) return html`<main class="screen"><${Hello} s=${s} /><div class="card note"><h3>No trips yet</h3><p style="margin:0">Build your commute to see your next school trip.</p></div><${Action} onClick=${() => go('manage')}>Build my commute<//></main>`;
-  const mine = slot.who === 'me';
-  const f = mine ? null : s.families.find(x => x.id === slot.who);
-  const t = slot.kind === 'drop' ? s.commute.drop.split('-')[0] : s.commute.pick.split('-')[0];
+  const slot = useNextTrip(a);
+  if (slot === undefined) return html`<main class="screen"><${Hello} a=${a} /><p class="muted center">Loading…</p></main>`;
+  if (!slot) return html`<main class="screen"><${Hello} a=${a} /><div class="card note"><h3>No trips yet</h3><p style="margin:0">Once a family joins your commute, your next school trip shows here.</p></div><${Action} onClick=${() => a.go('manage')}>Build my commute<//></main>`;
+  const mine = slot.parent_id === a.uid;
+  const driver = mine ? 'You' : ((a.people[a.gid] || []).find(p => p.parent_id === slot.parent_id) || {}).first_name || 'A parent';
+  const t = (slot.kind === 'drop' ? a.commute.drop_time : a.commute.pick_time).split('-')[0];
+  const when = slot.weekOffset ? `next ${DAYS[slot.day]}` : DAYS[slot.day];
+  const kids = (a.people[a.gid] || []).filter(p => p.status === 'accepted').reduce((s, p) => s + Number(p.kids || 0), 0);
+  const ms = mapState(a);
   return html`<main class="screen">
-    <${Hello} s=${s} />
+    <${Hello} a=${a} />
     <div class="card note">
       <h3>Next School Trip</h3>
-      <p style="margin:0">${mine ? html`You’re doing <b>${slot.kind === 'drop' ? 'drop-off' : 'pick-up'}</b> on ${DAYS[slot.day]}. Leave at <b>${t}</b>.` : html`<b>${f.name}</b> is doing ${slot.kind === 'drop' ? 'drop-off' : 'pick-up'} on ${DAYS[slot.day]} at <b>${t}</b>.`}</p>
+      <p style="margin:0">${mine ? html`You’re doing <b>${slot.kind === 'drop' ? 'drop-off' : 'pick-up'}</b> ${when}. Leave at <b>${t}</b>.` : html`<b>${driver}</b> is doing ${slot.kind === 'drop' ? 'drop-off' : 'pick-up'} ${when} at <b>${t}</b>.`}</p>
     </div>
-    <${SmartMap} s=${s} variant="trip" onInfo=${setInfo} />
-    <${MapLink} href=${gmDirections(s)}>Get directions in Google Maps<//>
+    <${SmartMap} s=${ms} variant="trip" onInfo=${setInfo} />
+    <${MapLink} href=${gmDirections(ms)}>Get directions in Google Maps<//>
     <div class="card">
-      <div class="row between" style="display:flex"><span class="muted">Children travelling</span><b>${1 + s.families.filter(x => x.status === 'accepted').reduce((a, x) => a + x.kids, 0)}</b></div>
-      <div class="row between" style="display:flex"><span class="muted">Journey</span><b>${info ? `${info.km} km · about ${info.mins} min` : '10 km · about 21 min'}</b></div>
+      <div class="row between" style="display:flex"><span class="muted">Children travelling</span><b>${kids}</b></div>
+      ${info ? html`<div class="row between" style="display:flex"><span class="muted">Journey from your home</span><b>${info.km} km · about ${info.mins} min</b></div>` : ''}
     </div>
-    <${Action} onClick=${() => go(s.parent.plus ? 'live' : 'plus')}>${s.parent.plus ? 'Live tracking' : 'Track it live with Scata Plus'}<//>
+    <${Action} onClick=${() => a.go(a.profile.plus ? 'live' : 'plus')}>${a.profile.plus ? 'Live tracking and chat' : 'Track it live with Scata Plus'}<//>
   </main>`;
 }
 
-function Plus({ s, update, go, say }) {
-  const on = s.parent.plus;
+function Plus({ a }) {
+  const on = a.profile.plus;
   return html`<main class="screen">
     <div class="hello"><h1>Scata Plus ⚡</h1><p>Extra peace of mind on every trip</p></div>
     <div class="card plus-card" style="gap:16px">
-      ${[['Live tracking', 'See the car on the map and how far away it is.'], ['In-commute chat', 'Message the parent doing the run without swapping numbers.'], ['Pick-up and arrival alerts', 'Get told the moment your child is collected and arrives at school.']].map(([a, b]) => html`<div class="feature">${I.check}<div><b>${a}</b><div class="muted">${b}</div></div></div>`)}
+      ${[['Live tracking', 'Follow the school run on the map while the driver shares their location.'], ['In-commute chat', 'Message the families in your commute without swapping numbers.'], ['Pick-up and arrival alerts', 'Get told when your child is collected and arrives at school.']].map(([x, y]) => html`<div class="feature">${I.check}<div><b>${x}</b><div class="muted">${y}</div></div></div>`)}
       <div class="center"><span style="font-size:30px;font-weight:800">€5.99</span><span class="muted"> / month</span></div>
     </div>
-    <p class="demo-note">Demo: no payment is taken. You can turn Plus off again at any time.</p>
-    <${Action} onClick=${() => { update(n => { n.parent.plus = !on; }); say(on ? 'Scata Plus turned off' : 'Welcome to Scata Plus'); if (!on) go('live'); }}>${on ? 'Turn off Scata Plus' : 'Start Scata Plus'}<//>
+    <p class="demo-note">Free while Scata is in pilot. No payment is taken.</p>
+    <${Action} disabled=${a.busy} onClick=${async () => { await a.run(() => q(sb.from('profiles').update({ plus: !on }).eq('id', a.uid)), on ? 'Scata Plus turned off' : 'Welcome to Scata Plus'); await a.reload(); if (!on) a.go('live'); }}>${on ? 'Turn off Scata Plus' : 'Start Scata Plus'}<//>
   </main>`;
 }
 
-function Live({ s, update, go, say }) {
+function Live({ a }) {
   const [tab, setTab] = useState('track');
-  const [p, setP] = useState(0);
+  const [locs, setLocs] = useState([]);
+  const [sharing, setSharing] = useState(false);
+  const [geoErr, setGeoErr] = useState('');
   const [info, setInfo] = useState(null);
-  const slot = nextTrip(s);
-  const driverId = slot && slot.who !== 'me' ? slot.who : (s.families.find(f => f.status === 'accepted') || {}).id;
-  const driver = s.families.find(f => f.id === driverId);
-  const [chatWith, setChatWith] = useState(driverId);
+  const [routeFrom, setRouteFrom] = useState(null);
+  const watch = useRef(null), lastSent = useRef(0), lastRoute = useRef(0);
+  const slot = useNextTrip(a);
+  const gid = a.gid;
   useEffect(() => {
-    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const t = setInterval(() => setP(v => (v >= 1 ? 0 : Math.min(1, v + (reduce ? .05 : .005)))), reduce ? 2000 : 200);
-    return () => clearInterval(t);
-  }, []);
-  if (!s.parent.plus) return html`<${Plus} s=${s} update=${update} go=${go} say=${say} />`;
-  if (!driver) return html`<main class="screen"><div class="card note"><h3>No one to track yet</h3><p style="margin:0">Once a family accepts your invite, you can follow their trips here.</p></div><${Action} onClick=${() => go('manage')}>Invite families<//></main>`;
-  const mins = Math.max(0, Math.round((info ? info.mins : 10) * (1 - p)));
+    if (!gid) return;
+    const load = () => q(sb.from('locations').select('*').eq('group_id', gid)).then(setLocs, () => {});
+    load();
+    const ch = sb.channel('loc-' + gid).on('postgres_changes', { event: '*', schema: 'public', table: 'locations', filter: `group_id=eq.${gid}` }, load).subscribe();
+    const t = setInterval(load, 30000);
+    return () => { sb.removeChannel(ch); clearInterval(t); };
+  }, [gid]);
+  const stop = async () => { if (watch.current != null) navigator.geolocation.clearWatch(watch.current); watch.current = null; setSharing(false); try { await q(sb.from('locations').delete().eq('group_id', gid).eq('parent_id', a.uid)); } catch (e) {} };
+  useEffect(() => () => { if (watch.current != null) { navigator.geolocation.clearWatch(watch.current); sb.from('locations').delete().eq('group_id', gid).eq('parent_id', a.uid).then(() => {}); } }, []);
+  const start = () => {
+    setGeoErr('');
+    if (!navigator.geolocation) { setGeoErr('This browser can’t share location.'); return; }
+    watch.current = navigator.geolocation.watchPosition(async (p) => {
+      setSharing(true);
+      if (Date.now() - lastSent.current < 10000) return;
+      lastSent.current = Date.now();
+      try { await q(sb.from('locations').upsert({ group_id: gid, parent_id: a.uid, lat: p.coords.latitude, lng: p.coords.longitude, updated_at: new Date().toISOString() })); } catch (e) { setGeoErr(e.message); }
+    }, (e) => { setSharing(false); setGeoErr(e.code === 1 ? 'Location is blocked. Allow location for this site in your browser settings, then try again.' : 'We couldn’t get your location. Try again outside or with Wi-Fi on.'); }, { enableHighAccuracy: true, maximumAge: 5000 });
+  };
+  const fresh = locs.filter(l => l.parent_id !== a.uid && Date.now() - new Date(l.updated_at) < 15 * 60000);
+  const driverLoc = (slot && fresh.find(l => l.parent_id === slot.parent_id)) || fresh[0];
+  const name = (id) => ((a.people[gid] || []).find(p => p.parent_id === id) || {}).first_name || 'A parent';
+  const carPos = driverLoc ? { lat: driverLoc.lat, lng: driverLoc.lng } : null;
+  useEffect(() => { if (carPos && Date.now() - lastRoute.current > 60000) { lastRoute.current = Date.now(); setRouteFrom(carPos); } }, [driverLoc && driverLoc.updated_at]);
+  if (!a.profile.plus) return html`<${Plus} a=${a} />`;
+  if (!gid) return html`<main class="screen"><div class="card note"><h3>No one to track yet</h3><p style="margin:0">Once a family joins your commute, you can follow the school run here.</p></div><${Action} onClick=${() => a.go('manage')}>Invite families<//></main>`;
   const tabs = html`<div class="tabs" style="justify-content:center"><button class=${'tab' + (tab === 'track' ? ' on' : '')} onClick=${() => setTab('track')}>${I.idcard}Live tracking</button><button class=${'tab' + (tab === 'chat' ? ' on' : '')} onClick=${() => setTab('chat')}>${I.heart}In-Commute chat</button></div>`;
-  if (tab === 'chat') return html`<main class="screen">${tabs}<${Chat} s=${s} update=${update} fam=${chatWith} setFam=${setChatWith} /><${Action} onClick=${() => go('commutes')}>Go back to commutes<//></main>`;
-  const first = driver.name.split(' ')[0];
+  if (tab === 'chat') return html`<main class="screen">${tabs}<${GroupPicker} a=${a} /><${Chat} a=${a} /><${Action} onClick=${() => a.go('commutes')}>Go back to commutes<//></main>`;
+  const ms = mapState(a);
   return html`<main class="screen">
     ${tabs}
-    <div class="card note"><h3>Next School Trip</h3><p style="margin:0">${mins > 0 ? `${first} is on the way and ${mins} min away. Please get ready!` : `${first} has arrived at school. Everyone is safely in.`}</p></div>
-    <${SmartMap} s=${s} variant="live" mode="car" progress=${p} onInfo=${setInfo} label=${`Live map showing ${first}'s car on the route to school`} />
-    <div class="sharing"><span class="pulse"></span>Sharing location</div>
-    <${MapLink} href=${gmDirections(s, 'car')}>Open this route in Google Maps<//>
+    <${GroupPicker} a=${a} />
+    <div class="card note"><h3>School run</h3><p style="margin:0">${driverLoc
+      ? `${name(driverLoc.parent_id)} is sharing their location${info ? `, about ${info.mins} min from school` : ''}. Updated ${ago(driverLoc.updated_at).toLowerCase()}.`
+      : sharing ? 'You’re sharing your location with your commute.' : 'No one is sharing their location right now. The parent doing the run can start sharing below.'}</p></div>
+    ${carPos ? html`<${SmartMap} s=${ms} variant="live" mode="car" carPos=${carPos} from=${routeFrom} onInfo=${setInfo} progress=${.5} label=${`Live map showing ${name(driverLoc.parent_id)}'s position`} />` : html`<${SmartMap} s=${ms} variant="trip" />`}
+    <div class="sharing">${sharing ? html`<span class="pulse"></span>Sharing your location` : ''}</div>
+    ${geoErr ? html`<p class="err center" style="margin:0">${geoErr}</p>` : ''}
+    ${sharing ? html`<button class="btn ghost" onClick=${stop}>Stop sharing my location</button>` : html`<button class="btn ghost" onClick=${start}>${I.pin} Share my location for this trip</button>`}
+    <p class="demo-note">Your location is shared only with families in this commute, and only while this screen is open.</p>
     <${Action} onClick=${() => setTab('chat')}>Chat!<//>
   </main>`;
 }
 
-function Chat({ s, update, fam, setFam }) {
+function Chat({ a }) {
   const [text, setText] = useState('');
+  const [msgs, setMsgs] = useState(null);
   const box = useRef();
-  const f = s.families.find(x => x.id === fam);
-  const msgs = s.chats[fam] || [];
-  const accepted = s.families.filter(x => x.status === 'accepted');
-  useEffect(() => { if (box.current) box.current.scrollTop = box.current.scrollHeight; }, [msgs.length]);
-  const send = (e) => {
+  const gid = a.gid;
+  const people = a.people[gid] || [];
+  useEffect(() => {
+    if (!gid) return;
+    q(sb.from('messages').select('*').eq('group_id', gid).order('created_at').limit(200)).then(setMsgs, e => { a.say(e.message); setMsgs([]); });
+    const ch = sb.channel('chat-' + gid).on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `group_id=eq.${gid}` }, (p) => setMsgs(m => (m || []).some(x => x.id === p.new.id) ? m : [...(m || []), p.new])).subscribe();
+    return () => { sb.removeChannel(ch); };
+  }, [gid]);
+  useEffect(() => { if (box.current) box.current.scrollTop = box.current.scrollHeight; }, [msgs && msgs.length]);
+  const send = async (e) => {
     e.preventDefault(); const t = text.trim(); if (!t) return;
-    const replies = ['Perfect, thanks!', 'Grand, see you then.', 'No problem at all 👍', 'Thanks for letting me know!'];
-    update(n => { (n.chats[fam] = n.chats[fam] || []).push({ me: true, text: t, t: clock(new Date()) }); n.events.push({ at: Date.now() + 2500, type: 'reply', fam, text: replies[Math.floor(Math.random() * replies.length)] }); });
     setText('');
+    try { const row = await q(sb.from('messages').insert({ group_id: gid, sender_id: a.uid, body: t }).select().single()); setMsgs(m => (m || []).some(x => x.id === row.id) ? m : [...(m || []), row]); }
+    catch (err) { a.say(err.message); setText(t); }
   };
-  if (!f) return '';
+  const name = (id) => (people.find(p => p.parent_id === id) || {}).first_name || 'A parent';
+  const others = people.filter(p => p.parent_id !== a.uid && p.status === 'accepted');
   return html`<div class="card" style="padding:0;gap:0">
     <div class="row" style="padding:14px 16px;border-bottom:1px solid var(--line)">
-      <${Avatar} name=${f.name} />
-      <div class="grow"><b>${f.name}</b><div class="small" style="color:var(--green)">Active now</div></div>
-      ${accepted.length > 1 ? html`<select aria-label="Choose chat" value=${fam} onChange=${e => setFam(e.target.value)} style="border:1px solid var(--line);border-radius:8px;padding:6px;background:var(--bg)">${accepted.map(a => html`<option value=${a.id} selected=${a.id === fam}>${a.name.split(' ')[0]}</option>`)}</select>` : ''}
+      <${Avatar} name=${others.map(p => p.first_name).join(' ') || 'Group'} />
+      <div class="grow"><b>${others.map(p => p.first_name).join(', ') || 'Your commute'}</b><div class="small muted">Everyone in this commute sees these messages</div></div>
     </div>
     <div ref=${box} class="stack" style="padding:16px;max-height:52vh;overflow-y:auto">
-      ${!msgs.length ? html`<p class="muted center">Say hello to ${f.name.split(' ')[0]}.</p>` : ''}
-      ${msgs.map(m => html`<div class=${'bubble-row' + (m.me ? ' me' : '')}><span class="small muted">${m.t}</span><div class="bubble">${m.text}</div></div>`)}
+      ${msgs === null ? html`<p class="muted center">Loading…</p>` : !msgs.length ? html`<p class="muted center">No messages yet. Say hello!</p>` : ''}
+      ${(msgs || []).map(m => { const me = m.sender_id === a.uid; return html`<div class=${'bubble-row' + (me ? ' me' : '')}><span class="small muted">${me ? '' : name(m.sender_id) + ' · '}${clock(new Date(m.created_at))}</span><div class="bubble">${m.body}</div></div>`; })}
     </div>
-    <form class="chat-input" style="padding:12px;border-top:1px solid var(--line)" onSubmit=${send}><input id="chat-text" placeholder="Write a message…" aria-label="Message" value=${text} onInput=${e => setText(e.target.value)} /><button class="btn sm" type="submit">Send</button></form>
+    <form class="chat-input" style="padding:12px;border-top:1px solid var(--line)" onSubmit=${send}><input id="chat-text" placeholder="Write a message…" aria-label="Message" value=${text} onInput=${e => setText(e.target.value)} maxlength="2000" /><button class="btn sm" type="submit">Send</button></form>
   </div>`;
 }
 
-function ParentProfile({ s, update, go, say }) {
-  const [tab, setTab] = useState('profile');
-  const [q, setQ] = useState('');
-  const name = `${s.parent.first} ${s.parent.last}`;
-  const accepted = s.families.filter(f => f.status === 'accepted').length;
-  const kids = s.parent.children.filter(c => c.name.toLowerCase().includes(q.toLowerCase()));
-  const tabs = html`<div class="tabs"><button class=${'tab' + (tab === 'profile' ? ' on' : '')} onClick=${() => setTab('profile')}>${I.idcard}Profile</button><button class="tab" onClick=${() => go('manage')}>${I.heart}Manage commute</button></div>`;
+function ParentProfile({ a }) {
+  const [q2, setQ] = useState('');
+  const name = `${a.profile.first_name} ${a.profile.last_name}`;
+  const kids = (a.children || []).filter(c => c.name.toLowerCase().includes(q2.toLowerCase()));
+  const accepted = a.gid ? (a.people[a.gid] || []).filter(p => p.status === 'accepted').length : 1;
+  const tabs = html`<div class="tabs"><button class="tab on">${I.idcard}Profile</button><button class="tab" onClick=${() => a.go('manage')}>${I.heart}Manage commute</button></div>`;
   return html`<main class="screen">
     <div><h2 class="title">Parent profile</h2><div class="crumbs"><b>Dashboard</b>•<span>Profile</span></div></div>
-    <${ProfileHero} name=${name} line1=${s.school.name} line2=${s.parent.plus ? 'Parent · Scata Plus' : 'Parent'} tabs=${tabs} />
-    <div class="card"><${Stats} s=${savings(s.commute.mode, accepted + 1)} labels=${['saved a year', 'saved a year', 'saved a year']} /></div>
+    <${ProfileHero} name=${name} line1=${a.school.name} line2=${(a.profile.plus ? 'Parent · Scata Plus · ' : 'Parent · ') + a.session.user.email} tabs=${tabs} />
+    <div class="card"><${Stats} s=${savings(a.commute.mode, Math.max(1, accepted))} labels=${['saved a year', 'saved a year', 'saved a year']} /></div>
     <div class="stack">
       <div><h3>Children</h3><p class="muted small" style="margin:4px 0 0">Add and manage children</p></div>
-      <div><button class="btn green" onClick=${() => go('newChild')}>${I.plus}Add child</button></div>
+      <div><button class="btn green" onClick=${() => a.go('newChild')}>${I.plus}Add child</button></div>
       <div class="table">
-        <div class="search">${I.search}<input id="child-search" placeholder="Search…" aria-label="Search children" value=${q} onInput=${e => setQ(e.target.value)} /></div>
+        <div class="search">${I.search}<input id="child-search" placeholder="Search…" aria-label="Search children" value=${q2} onInput=${e => setQ(e.target.value)} /></div>
         <div class="trow thead" style="grid-template-columns:1fr auto 40px"><span>Name</span><span>Date of birth</span><span></span></div>
-        ${kids.map(c => html`<div class="trow" style="grid-template-columns:1fr auto 40px"><span class="row" style="gap:10px"><${Avatar} name=${c.name} size="sm" />${c.name}</span><span style="font-variant-numeric:tabular-nums">${new Date(c.dob).toLocaleDateString('en-IE')}</span><button class="iconbtn" style="width:32px;height:32px" aria-label=${'Remove ' + c.name} onClick=${() => { update(n => { n.parent.children = n.parent.children.filter(x => x.id !== c.id); }); say(`${c.name} removed`); }}>✕</button></div>`)}
-        <div class="tfoot"><span>${kids.length} of ${s.parent.children.length}</span></div>
+        ${kids.map(c => html`<div class="trow" style="grid-template-columns:1fr auto 40px"><span class="row" style="gap:10px"><${Avatar} name=${c.name} size="sm" />${c.name}</span><span style="font-variant-numeric:tabular-nums">${new Date(c.dob).toLocaleDateString('en-IE')}</span><button class="iconbtn" style="width:32px;height:32px" aria-label=${'Remove ' + c.name} onClick=${async () => { await a.run(() => q(sb.from('children').delete().eq('id', c.id)), `${c.name} removed`); a.reload(); }}>✕</button></div>`)}
+        <div class="tfoot"><span>${kids.length} of ${(a.children || []).length}</span></div>
       </div>
     </div>
+    <button class="btn ghost" onClick=${() => a.go('setup')}>Edit my commute</button>
   </main>`;
 }
 
-function NewChild({ update, go, say }) {
-  const [f, setF] = useState({ name: '', dob: '', school: '' });
+function NewChild({ a }) {
+  const [f, setF] = useState({ name: '', dob: '' });
   const [tried, setTried] = useState(false);
   return html`<main class="screen">
     <div><h2 class="title">New child</h2><div class="crumbs"><b>Profile</b>•<span>Add child</span></div></div>
-    <form class="card form" id="child-form" onSubmit=${e => { e.preventDefault(); setTried(true); if (!f.name || !f.dob) return; update(n => { n.parent.children.push({ id: uid(), name: f.name, dob: f.dob }); }); say(`${f.name} added`); go('profile'); }}>
+    <form class="card form" id="child-form" onSubmit=${async e => { e.preventDefault(); setTried(true); if (!f.name || !f.dob) return; await a.run(() => q(sb.from('children').insert({ parent_id: a.uid, name: f.name, dob: f.dob })), `${f.name} added`); await a.reload(); a.go('profile'); }}>
       <${Field} id="nc-name" label="First name" value=${f.name} onInput=${v => setF({ ...f, name: v })} err=${tried && !f.name && 'Enter a name'} />
       <${Field} id="nc-dob" label="Date of birth" type="date" value=${f.dob} onInput=${v => setF({ ...f, dob: v })} err=${tried && !f.dob && 'Pick a date'} />
-      <p class="small muted" style="margin:0">Children can view the app but can’t make changes. Photo ID can be added once Scata goes live.</p>
+      <p class="small muted" style="margin:0">Only you can see your children’s details. Families in your commute see how many children you have.</p>
     </form>
-    <div class="action"><button class="btn" type="submit" form="child-form">Add child</button></div>
+    <div class="action"><button class="btn" type="submit" form="child-form" disabled=${a.busy}>Add child</button></div>
   </main>`;
 }
 
-function Commutes({ s, go }) {
-  const accepted = s.families.filter(f => f.status === 'accepted');
-  const mine = s.rota ? s.rota.filter(x => x.who === 'me').length : 0;
+function Commutes({ a }) {
+  const accepted = a.gid ? (a.people[a.gid] || []).filter(p => p.status === 'accepted' && p.parent_id !== a.uid) : [];
   return html`<main class="screen">
     <div><h2 class="title">Commutes</h2><div class="crumbs"><b>Dashboard</b>•<span>Commutes</span></div></div>
+    <${GroupPicker} a=${a} />
     <div class="card">
-      <div class="row"><span class="mode on" style="width:48px;height:48px;cursor:default">${MODE_ICON[s.commute.mode]}</span><div class="grow"><b>School run · ${s.school.name}</b><div class="muted small">${MODE_NAME[s.commute.mode]} · drop-off ${s.commute.drop} · pick-up ${s.commute.pick}</div></div></div>
+      <div class="row"><span class="mode on" style="width:48px;height:48px;cursor:default">${MODE_ICON[a.commute.mode]}</span><div class="grow"><b>School run · ${a.school.name}</b><div class="muted small">${MODE_NAME[a.commute.mode]} · drop-off ${a.commute.drop_time} · pick-up ${a.commute.pick_time}</div></div></div>
       <div class="row between" style="display:flex"><span class="muted">Families sharing</span><b>${accepted.length + 1}</b></div>
-      <div class="row between" style="display:flex"><span class="muted">Your trips this week</span><b>${mine} of 10</b></div>
-      <div class="row" style="flex-wrap:wrap;gap:8px">${accepted.map(f => html`<span class="row" style="gap:6px;background:var(--surface);border-radius:20px;padding:4px 10px 4px 4px"><${Avatar} name=${f.name} size="sm" /><span class="small">${f.name}</span></span>`)}</div>
-      <div class="row" style="gap:8px"><button class="btn sm ghost" onClick=${() => go('calendar')}>Calendar</button><button class="btn sm ghost" onClick=${() => go('manage')}>Manage</button><button class="btn sm ghost" onClick=${() => go('setup')}>Edit</button></div>
+      <div class="row" style="flex-wrap:wrap;gap:8px">${accepted.map(p => html`<span class="row" style="gap:6px;background:var(--surface);border-radius:20px;padding:4px 10px 4px 4px"><${Avatar} name=${p.first_name + ' ' + p.last_name} size="sm" /><span class="small">${p.first_name} ${p.last_name}</span></span>`)}</div>
+      <div class="row" style="gap:8px"><button class="btn sm ghost" onClick=${() => a.go('calendar')}>Calendar</button><button class="btn sm ghost" onClick=${() => a.go('manage')}>Manage</button><button class="btn sm ghost" onClick=${() => a.go('setup')}>Edit</button></div>
     </div>
-    <button class="btn ghost" onClick=${() => go('setup')}>${'+ Set up another commute'}</button>
+    ${a.gid && !(a.groups || []).find(g => g.id === a.gid).mine ? html`<button class="btn ghost" disabled=${a.busy} onClick=${async () => { await a.run(() => rpc('leave_group', { p_group: a.gid }), 'You left the commute'); await a.reload(); }}>Leave this commute</button>` : ''}
   </main>`;
 }
 
-function Notifications({ s, update, go }) {
-  useEffect(() => { const t = setTimeout(() => update(n => n.notifications.forEach(x => { x.read = true; })), 1500); return () => clearTimeout(t); }, []);
-  const ago = (at) => { const m = Math.round((Date.now() - at) / 60000); return m < 1 ? 'Just now' : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`; };
-  const slot = nextTrip(s);
-  const tripLine = slot ? (slot.who === 'me' ? `You’re doing ${slot.kind === 'drop' ? 'drop-off' : 'pick-up'} on ${DAYS[slot.day]}. Leave at ${(slot.kind === 'drop' ? s.commute.drop : s.commute.pick).split('-')[0]}.` : `${(s.families.find(f => f.id === slot.who) || {}).name} is doing ${slot.kind === 'drop' ? 'drop-off' : 'pick-up'} on ${DAYS[slot.day]}.`) : null;
+function Notifications({ a }) {
+  useEffect(() => { const t = setTimeout(async () => { if ((a.notifications || []).some(n => !n.read)) { try { await q(sb.from('notifications').update({ read: true }).eq('user_id', a.uid).eq('read', false)); a.reload(); } catch (e) {} } }, 1500); return () => clearTimeout(t); }, []);
+  const icon = { invite: I.mail, swap: I.cal, rota: I.cal, chat: I.heart, school: I.school };
   return html`<main class="screen">
     <div><h2 class="title">Notifications</h2><div class="crumbs"><b>Dashboard</b>•<span>Notifications</span></div></div>
-    ${tripLine ? html`<button class="notif" style="background:var(--amber-soft);border:0;text-align:left" onClick=${() => go('trip')}><span class="ico">${I.route}</span><span><b>Next trip</b><div>${tripLine}</div></span></button>` : ''}
-    <div class="stack" style="gap:4px">${s.notifications.map(n => html`<div class=${'notif' + (n.read ? '' : ' unread')}><span class="ico">${n.kind === 'cal' ? I.cal : I.mail}</span><div class="grow"><div>${n.text}</div><div class="small muted">${ago(n.at)}</div></div></div>`)}</div>
-    ${!s.notifications.length ? html`<p class="muted center">You’re all caught up.</p>` : ''}
+    <${PendingInvites} a=${a} />
+    <${SwapRequests} a=${a} onDone=${() => a.reload()} />
+    <div class="stack" style="gap:4px">${(a.notifications || []).map(n => html`<div class=${'notif' + (n.read ? '' : ' unread')}><span class="ico">${icon[n.kind] || I.bell}</span><div class="grow"><div>${n.body}</div><div class="small muted">${ago(n.created_at)}</div></div></div>`)}</div>
+    ${!(a.notifications || []).length ? html`<p class="muted center">You’re all caught up.</p>` : ''}
   </main>`;
 }
 
