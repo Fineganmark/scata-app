@@ -5,14 +5,17 @@ create extension if not exists pgcrypto;
 
 -- ---------- tables ----------
 
-create table if not exists public.schools (
+-- A hub is anything families travel to together: a school, a sports club, or a group a parent sets up.
+create table if not exists public.hubs (
   id uuid primary key default gen_random_uuid(),
   code text not null unique,
+  kind text not null default 'school' check (kind in ('school', 'sport', 'other')),
   name text not null,
-  eircode text not null,
-  students text not null default '100-200',
+  address text not null,
+  size text,
   open_time text not null default '08:30-09:30',
   close_time text not null default '14:15-15:00',
+  days smallint[] not null default '{0,1,2,3,4}' check (days <@ '{0,1,2,3,4,5,6}' and cardinality(days) > 0),
   lat double precision,
   lng double precision,
   created_by uuid references auth.users on delete set null,
@@ -21,12 +24,19 @@ create table if not exists public.schools (
 
 create table if not exists public.profiles (
   id uuid primary key references auth.users on delete cascade,
-  role text not null check (role in ('school', 'parent')),
   first_name text not null,
   last_name text not null,
-  school_id uuid references public.schools on delete set null,
   plus boolean not null default false,
   created_at timestamptz not null default now()
+);
+
+-- Who belongs to each hub. Admins (the school, the coach, or the parent who set it up) manage it.
+create table if not exists public.hub_members (
+  hub_id uuid not null references public.hubs on delete cascade,
+  user_id uuid not null references public.profiles on delete cascade,
+  role text not null default 'member' check (role in ('admin', 'member')),
+  created_at timestamptz not null default now(),
+  primary key (hub_id, user_id)
 );
 
 create table if not exists public.children (
@@ -37,9 +47,10 @@ create table if not exists public.children (
   created_at timestamptz not null default now()
 );
 
+-- One commute per parent per hub.
 create table if not exists public.commutes (
-  parent_id uuid primary key references public.profiles on delete cascade,
-  school_id uuid not null references public.schools on delete cascade,
+  parent_id uuid not null references public.profiles on delete cascade,
+  hub_id uuid not null references public.hubs on delete cascade,
   home text not null default '',
   lat double precision,
   lng double precision,
@@ -48,25 +59,27 @@ create table if not exists public.commutes (
   drop_time text not null default '08:30-09:30',
   pick_time text not null default '13:15-14:15',
   accepted_terms boolean not null default false,
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  primary key (parent_id, hub_id)
 );
 
--- Emails a school has invited. Parents still join with the school code.
-create table if not exists public.school_invites (
+-- Emails a hub admin has invited. People still join with the hub code or link.
+create table if not exists public.hub_invites (
   id uuid primary key default gen_random_uuid(),
-  school_id uuid not null references public.schools on delete cascade,
+  hub_id uuid not null references public.hubs on delete cascade,
   email text not null,
   name text not null default '',
   created_at timestamptz not null default now(),
-  unique (school_id, email)
+  unique (hub_id, email)
 );
 
--- A commute group belongs to the parent who started it; others join by invitation.
+-- A commute group belongs to the parent who started it; others join by invitation. One per parent per hub.
 create table if not exists public.commute_groups (
   id uuid primary key default gen_random_uuid(),
-  school_id uuid not null references public.schools on delete cascade,
-  owner_id uuid not null unique references public.profiles on delete cascade,
-  created_at timestamptz not null default now()
+  hub_id uuid not null references public.hubs on delete cascade,
+  owner_id uuid not null references public.profiles on delete cascade,
+  created_at timestamptz not null default now(),
+  unique (hub_id, owner_id)
 );
 
 create table if not exists public.group_members (
@@ -81,7 +94,7 @@ create table if not exists public.rota_slots (
   id uuid primary key default gen_random_uuid(),
   group_id uuid not null references public.commute_groups on delete cascade,
   week_start date not null,
-  day smallint not null check (day between 0 and 4),
+  day smallint not null check (day between 0 and 6),
   kind text not null check (kind in ('drop', 'pick')),
   parent_id uuid not null references public.profiles on delete cascade,
   confirmed boolean not null default false,
@@ -127,19 +140,26 @@ create table if not exists public.notifications (
 
 create index if not exists notifications_user on public.notifications (user_id, created_at desc);
 create index if not exists messages_group on public.messages (group_id, created_at);
-create index if not exists profiles_school on public.profiles (school_id);
-create index if not exists commutes_school on public.commutes (school_id);
+create index if not exists hub_members_user on public.hub_members (user_id);
+create index if not exists commutes_hub on public.commutes (hub_id);
 
 -- ---------- helpers (run with owner rights so policies can use them without recursion) ----------
 
-create or replace function public.my_school() returns uuid
+create or replace function public.in_hub(h uuid) returns boolean
 language sql stable security definer set search_path = public as $$
-  select school_id from profiles where id = auth.uid()
+  select exists (select 1 from hub_members where hub_id = h and user_id = auth.uid())
 $$;
 
-create or replace function public.is_school_manager(s uuid) returns boolean
+create or replace function public.is_hub_admin(h uuid) returns boolean
 language sql stable security definer set search_path = public as $$
-  select exists (select 1 from profiles where id = auth.uid() and role = 'school' and school_id = s)
+  select exists (select 1 from hub_members where hub_id = h and user_id = auth.uid() and role = 'admin')
+$$;
+
+-- True when I administer a hub that this person belongs to.
+create or replace function public.admin_of(other uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from hub_members a join hub_members b on b.hub_id = a.hub_id
+                  where a.user_id = auth.uid() and a.role = 'admin' and b.user_id = other)
 $$;
 
 create or replace function public.in_group(g uuid) returns boolean
@@ -164,13 +184,20 @@ language sql security definer set search_path = public as $$
 $$;
 revoke execute on function public.notify(uuid, text, text) from public, anon, authenticated;
 
+-- How a hub's trip is described in messages.
+create or replace function public.trip_word(h uuid) returns text
+language sql stable security definer set search_path = public as $$
+  select case kind when 'school' then 'the school run to ' else 'trips to ' end || name from hubs where id = h
+$$;
+
 -- ---------- row level security ----------
 
-alter table public.schools enable row level security;
+alter table public.hubs enable row level security;
 alter table public.profiles enable row level security;
+alter table public.hub_members enable row level security;
 alter table public.children enable row level security;
 alter table public.commutes enable row level security;
-alter table public.school_invites enable row level security;
+alter table public.hub_invites enable row level security;
 alter table public.commute_groups enable row level security;
 alter table public.group_members enable row level security;
 alter table public.rota_slots enable row level security;
@@ -179,28 +206,30 @@ alter table public.messages enable row level security;
 alter table public.locations enable row level security;
 alter table public.notifications enable row level security;
 
-drop policy if exists "read my school" on public.schools;
-create policy "read my school" on public.schools for select to authenticated using (id = public.my_school());
-drop policy if exists "manager edits school" on public.schools;
-create policy "manager edits school" on public.schools for update to authenticated using (public.is_school_manager(id)) with check (public.is_school_manager(id));
+drop policy if exists "read my hubs" on public.hubs;
+create policy "read my hubs" on public.hubs for select to authenticated using (public.in_hub(id));
+drop policy if exists "admin edits hub" on public.hubs;
+create policy "admin edits hub" on public.hubs for update to authenticated using (public.is_hub_admin(id)) with check (public.is_hub_admin(id));
+
+drop policy if exists "read memberships" on public.hub_members;
+create policy "read memberships" on public.hub_members for select to authenticated using (user_id = auth.uid() or public.is_hub_admin(hub_id));
 
 drop policy if exists "read profiles" on public.profiles;
 create policy "read profiles" on public.profiles for select to authenticated
-  using (id = auth.uid() or public.shares_group(id) or (school_id is not null and public.is_school_manager(school_id)));
+  using (id = auth.uid() or public.shares_group(id) or public.admin_of(id));
 drop policy if exists "edit own profile" on public.profiles;
-create policy "edit own profile" on public.profiles for update to authenticated
-  using (id = auth.uid()) with check (id = auth.uid() and school_id is not distinct from public.my_school());
+create policy "edit own profile" on public.profiles for update to authenticated using (id = auth.uid()) with check (id = auth.uid());
 
 drop policy if exists "own children" on public.children;
 create policy "own children" on public.children for all to authenticated using (parent_id = auth.uid()) with check (parent_id = auth.uid());
 
 drop policy if exists "own commute" on public.commutes;
 create policy "own commute" on public.commutes for all to authenticated
-  using (parent_id = auth.uid()) with check (parent_id = auth.uid() and school_id = public.my_school());
+  using (parent_id = auth.uid()) with check (parent_id = auth.uid() and public.in_hub(hub_id));
 
-drop policy if exists "manager invites" on public.school_invites;
-create policy "manager invites" on public.school_invites for all to authenticated
-  using (public.is_school_manager(school_id)) with check (public.is_school_manager(school_id));
+drop policy if exists "admin invites" on public.hub_invites;
+create policy "admin invites" on public.hub_invites for all to authenticated
+  using (public.is_hub_admin(hub_id)) with check (public.is_hub_admin(hub_id));
 
 drop policy if exists "read my groups" on public.commute_groups;
 create policy "read my groups" on public.commute_groups for select to authenticated
@@ -233,77 +262,131 @@ drop policy if exists "mark notifications read" on public.notifications;
 create policy "mark notifications read" on public.notifications for update to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
 
 -- Columns a person may change on their own rows.
-revoke update on public.profiles from authenticated;
+revoke insert, update on public.profiles from authenticated;
 grant update (first_name, last_name, plus) on public.profiles to authenticated;
 revoke update on public.notifications from authenticated;
 grant update (read) on public.notifications to authenticated;
+revoke update on public.hubs from authenticated;
+grant update (name, address, size, open_time, close_time, days, lat, lng) on public.hubs to authenticated;
+revoke insert, update, delete on public.hub_members, public.commute_groups, public.group_members, public.rota_slots, public.swap_requests from authenticated;
+revoke insert on public.hubs from authenticated;
 
 -- ---------- actions (called from the app) ----------
 
-create or replace function public.create_school(p_first text, p_last text, p_name text, p_eircode text, p_students text, p_open text, p_close text, p_lat double precision default null, p_lng double precision default null)
-returns public.schools language plpgsql security definer set search_path = public as $$
-declare s schools; c text;
+drop function if exists public.nearby_parents();
+drop function if exists public.invite_parent(uuid);
+
+create or replace function public.set_profile(p_first text, p_last text)
+returns public.profiles language plpgsql security definer set search_path = public as $$
+declare p profiles;
 begin
   if auth.uid() is null then raise exception 'Please sign in first'; end if;
-  if exists (select 1 from profiles where id = auth.uid()) then raise exception 'This account is already set up'; end if;
+  if trim(coalesce(p_first, '')) = '' or trim(coalesce(p_last, '')) = '' then raise exception 'Enter your first name and surname'; end if;
+  insert into profiles (id, first_name, last_name) values (auth.uid(), trim(p_first), trim(p_last))
+    on conflict (id) do update set first_name = excluded.first_name, last_name = excluded.last_name
+    returning * into p;
+  return p;
+end $$;
+
+-- Anyone signed in can set up a hub and becomes its admin. p_commute adds the creator as a family sharing trips there too.
+create or replace function public.create_hub(p_kind text, p_name text, p_address text, p_size text, p_open text, p_close text, p_days smallint[], p_lat double precision default null, p_lng double precision default null, p_commute boolean default false)
+returns public.hubs language plpgsql security definer set search_path = public as $$
+declare h hubs; c text;
+begin
+  if not exists (select 1 from profiles where id = auth.uid()) then raise exception 'Please add your name first'; end if;
+  if trim(coalesce(p_name, '')) = '' then raise exception 'Give the group a name'; end if;
+  if (select count(*) from hub_members where user_id = auth.uid() and role = 'admin') >= 20 then raise exception 'You already manage 20 groups'; end if;
   loop
-    c := 'sca' || lpad((floor(random() * 10000))::int::text, 4, '0');
-    exit when not exists (select 1 from schools where code = c);
+    c := 'sca' || lpad((floor(random() * 1000000))::int::text, 6, '0');
+    exit when not exists (select 1 from hubs where code = c);
   end loop;
-  insert into schools (code, name, eircode, students, open_time, close_time, lat, lng, created_by)
-    values (c, p_name, upper(p_eircode), p_students, p_open, p_close, p_lat, p_lng, auth.uid()) returning * into s;
-  insert into profiles (id, role, first_name, last_name, school_id) values (auth.uid(), 'school', p_first, p_last, s.id);
-  return s;
+  insert into hubs (code, kind, name, address, size, open_time, close_time, days, lat, lng, created_by)
+    values (c, p_kind, trim(p_name), trim(p_address), nullif(p_size, ''), p_open, p_close, coalesce(p_days, '{0,1,2,3,4}'), p_lat, p_lng, auth.uid()) returning * into h;
+  insert into hub_members (hub_id, user_id, role) values (h.id, auth.uid(), 'admin');
+  if p_commute then insert into commutes (parent_id, hub_id, drop_time, pick_time) values (auth.uid(), h.id, h.open_time, h.close_time); end if;
+  return h;
 end $$;
 
-create or replace function public.join_school(p_code text, p_first text, p_last text)
-returns uuid language plpgsql security definer set search_path = public as $$
-declare sid uuid;
+-- Join a hub with its code. Also used by an admin of a hub to start sharing trips there themselves.
+create or replace function public.join_hub(p_code text)
+returns public.hubs language plpgsql security definer set search_path = public as $$
+declare h hubs; me profiles; fresh boolean;
 begin
-  if auth.uid() is null then raise exception 'Please sign in first'; end if;
-  if exists (select 1 from profiles where id = auth.uid()) then raise exception 'This account is already set up'; end if;
-  select id into sid from schools where code = lower(trim(p_code));
-  if sid is null then raise exception 'That school code doesn''t match a school. Check the code in your school''s invite.'; end if;
-  insert into profiles (id, role, first_name, last_name, school_id) values (auth.uid(), 'parent', p_first, p_last, sid);
-  insert into commutes (parent_id, school_id) values (auth.uid(), sid);
-  perform notify(p.id, 'school', p_first || ' ' || p_last || ' joined your school on Scata.') from profiles p where p.school_id = sid and p.role = 'school';
-  return sid;
+  select * into me from profiles where id = auth.uid();
+  if me.id is null then raise exception 'Please add your name first'; end if;
+  select * into h from hubs where code = lower(trim(p_code));
+  if h.id is null then raise exception 'That code doesn''t match a group. Check the code in your invite.'; end if;
+  insert into hub_members (hub_id, user_id) values (h.id, auth.uid()) on conflict do nothing;
+  fresh := found;
+  insert into commutes (parent_id, hub_id, drop_time, pick_time) values (auth.uid(), h.id, h.open_time, h.close_time) on conflict do nothing;
+  if fresh then
+    perform notify(m.user_id, 'school', me.first_name || ' ' || me.last_name || ' joined ' || h.name || ' on Scata.')
+       from hub_members m where m.hub_id = h.id and m.role = 'admin' and m.user_id <> auth.uid();
+  end if;
+  return h;
 end $$;
 
--- The school's view of its parents: joined parents plus invited emails that have not joined yet.
-create or replace function public.school_parents()
+-- My hubs, with my role and whether I share trips there.
+create or replace function public.my_hubs()
+returns table (id uuid, code text, kind text, name text, address text, size text, open_time text, close_time text, days smallint[], lat double precision, lng double precision, role text, commuting boolean)
+language sql stable security definer set search_path = public as $$
+  select h.id, h.code, h.kind, h.name, h.address, h.size, h.open_time, h.close_time, h.days, h.lat, h.lng, m.role,
+         exists (select 1 from commutes c where c.hub_id = h.id and c.parent_id = auth.uid())
+    from hub_members m join hubs h on h.id = m.hub_id
+   where m.user_id = auth.uid()
+   order by m.created_at
+$$;
+
+-- Leave a hub: my commute, my places in its commute groups, and my future rota slots go.
+create or replace function public.leave_hub(p_hub uuid)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if is_hub_admin(p_hub) and not exists (select 1 from hub_members where hub_id = p_hub and role = 'admin' and user_id <> auth.uid())
+     and exists (select 1 from hub_members where hub_id = p_hub and user_id <> auth.uid()) then
+    raise exception 'You''re the only admin. Other families still use this group, so it needs an admin.';
+  end if;
+  delete from rota_slots s using commute_groups g where s.group_id = g.id and g.hub_id = p_hub and s.parent_id = auth.uid() and s.week_start >= date_trunc('week', now())::date;
+  delete from group_members m using commute_groups g where m.group_id = g.id and g.hub_id = p_hub and m.parent_id = auth.uid();
+  delete from commute_groups where hub_id = p_hub and owner_id = auth.uid();
+  delete from commutes where hub_id = p_hub and parent_id = auth.uid();
+  delete from hub_members where hub_id = p_hub and user_id = auth.uid();
+  delete from hubs where id = p_hub and not exists (select 1 from hub_members where hub_id = p_hub);
+end $$;
+
+-- An admin's view of the hub's families: who joined plus invited emails that have not joined yet.
+create or replace function public.hub_people(p_hub uuid)
 returns table (name text, email text, status text, joined_at timestamptz)
 language sql stable security definer set search_path = public as $$
-  select p.first_name || ' ' || p.last_name, u.email::text, 'active', p.created_at
-    from profiles p join auth.users u on u.id = p.id
-   where p.school_id = my_school() and p.role = 'parent' and is_school_manager(my_school())
+  select p.first_name || ' ' || p.last_name, u.email::text, case when m.role = 'admin' then 'admin' else 'active' end, m.created_at
+    from hub_members m join profiles p on p.id = m.user_id join auth.users u on u.id = m.user_id
+   where m.hub_id = p_hub and is_hub_admin(p_hub)
   union all
   select i.name, i.email, 'invited', i.created_at
-    from school_invites i
-   where i.school_id = my_school() and is_school_manager(my_school())
-     and not exists (select 1 from auth.users u join profiles p on p.id = u.id where lower(u.email) = lower(i.email) and p.school_id = i.school_id)
+    from hub_invites i
+   where i.hub_id = p_hub and is_hub_admin(p_hub)
+     and not exists (select 1 from auth.users u join hub_members m on m.user_id = u.id where lower(u.email) = lower(i.email) and m.hub_id = i.hub_id)
   order by 4 desc
 $$;
 
-create or replace function public.school_stats()
-returns table (parents bigint, commutes bigint, walk bigint, bike bigint, car bigint, bus bigint, groups bigint)
+create or replace function public.hub_stats(p_hub uuid)
+returns table (members bigint, commutes bigint, walk bigint, bike bigint, car bigint, bus bigint, groups bigint)
 language sql stable security definer set search_path = public as $$
-  select (select count(*) from profiles where school_id = my_school() and role = 'parent'),
-         (select count(*) from commutes where school_id = my_school() and accepted_terms),
-         (select count(*) from commutes where school_id = my_school() and accepted_terms and mode = 'walk'),
-         (select count(*) from commutes where school_id = my_school() and accepted_terms and mode = 'bike'),
-         (select count(*) from commutes where school_id = my_school() and accepted_terms and mode = 'car'),
-         (select count(*) from commutes where school_id = my_school() and accepted_terms and mode = 'bus'),
-         (select count(*) from commute_groups where school_id = my_school())
-   where is_school_manager(my_school())
+  select (select count(*) from hub_members where hub_id = p_hub),
+         (select count(*) from commutes where hub_id = p_hub and accepted_terms),
+         (select count(*) from commutes where hub_id = p_hub and accepted_terms and mode = 'walk'),
+         (select count(*) from commutes where hub_id = p_hub and accepted_terms and mode = 'bike'),
+         (select count(*) from commutes where hub_id = p_hub and accepted_terms and mode = 'car'),
+         (select count(*) from commutes where hub_id = p_hub and accepted_terms and mode = 'bus'),
+         (select count(*) from commute_groups where hub_id = p_hub)
+   where is_hub_admin(p_hub)
 $$;
 
--- Other parents at my school who have set up a commute. Shows a first name and rough distance only, never an address.
-create or replace function public.nearby_parents()
+-- Other families in the hub who have set up a commute. Shows a first name and rough distance only, never an address.
+create or replace function public.nearby_parents(p_hub uuid)
 returns table (parent_id uuid, first_name text, kids bigint, km numeric, mode text, status text)
 language sql stable security definer set search_path = public as $$
-  with me as (select c.* from commutes c where c.parent_id = auth.uid()),
-       g as (select id from commute_groups where owner_id = auth.uid())
+  with me as (select c.* from commutes c where c.parent_id = auth.uid() and c.hub_id = p_hub),
+       g as (select id from commute_groups where owner_id = auth.uid() and hub_id = p_hub)
   select p.id, p.first_name,
          (select count(*) from children ch where ch.parent_id = p.id),
          case when me.lat is null or c.lat is null then null
@@ -311,36 +394,45 @@ language sql stable security definer set search_path = public as $$
          c.mode,
          coalesce((select m.status from group_members m join g on g.id = m.group_id where m.parent_id = p.id), 'none')
     from me
-    join commutes c on c.school_id = me.school_id and c.parent_id <> me.parent_id and c.accepted_terms
+    join commutes c on c.hub_id = me.hub_id and c.parent_id <> me.parent_id and c.accepted_terms
     join profiles p on p.id = c.parent_id
    order by 4 nulls last, 2
    limit 30
 $$;
 
-create or replace function public.invite_parent(p_target uuid)
+-- The commute groups I own or was invited to in one hub.
+create or replace function public.my_groups(p_hub uuid)
+returns table (id uuid, mine boolean, status text)
+language sql stable security definer set search_path = public as $$
+  select g.id, true, 'accepted' from commute_groups g where g.hub_id = p_hub and g.owner_id = auth.uid()
+  union all
+  select g.id, false, m.status from group_members m join commute_groups g on g.id = m.group_id where g.hub_id = p_hub and m.parent_id = auth.uid()
+$$;
+
+create or replace function public.invite_parent(p_hub uuid, p_target uuid)
 returns void language plpgsql security definer set search_path = public as $$
-declare gid uuid; sid uuid := my_school(); me profiles;
+declare gid uuid; me profiles;
 begin
-  select * into me from profiles where id = auth.uid() and role = 'parent';
-  if me.id is null then raise exception 'Only parents can invite other parents'; end if;
-  if not exists (select 1 from commutes where parent_id = p_target and school_id = sid and accepted_terms) then raise exception 'That parent isn''t available to invite'; end if;
-  insert into commute_groups (school_id, owner_id) values (sid, auth.uid()) on conflict (owner_id) do nothing;
-  select id into gid from commute_groups where owner_id = auth.uid();
+  select * into me from profiles where id = auth.uid();
+  if not exists (select 1 from commutes where parent_id = auth.uid() and hub_id = p_hub and accepted_terms) then raise exception 'Set up your own commute first'; end if;
+  if not exists (select 1 from commutes where parent_id = p_target and hub_id = p_hub and accepted_terms) then raise exception 'That family isn''t available to invite'; end if;
+  insert into commute_groups (hub_id, owner_id) values (p_hub, auth.uid()) on conflict (hub_id, owner_id) do nothing;
+  select id into gid from commute_groups where hub_id = p_hub and owner_id = auth.uid();
   insert into group_members (group_id, parent_id) values (gid, p_target)
     on conflict (group_id, parent_id) do update set status = 'pending' where group_members.status = 'declined';
-  perform notify(p_target, 'invite', me.first_name || ' ' || me.last_name || ' invited you to share the school commute.');
+  perform notify(p_target, 'invite', me.first_name || ' ' || me.last_name || ' invited you to share ' || trip_word(p_hub) || '.');
 end $$;
 
 create or replace function public.respond_invite(p_group uuid, p_accept boolean)
 returns void language plpgsql security definer set search_path = public as $$
-declare owner uuid; me profiles;
+declare g commute_groups; me profiles;
 begin
   select * into me from profiles where id = auth.uid();
   update group_members set status = case when p_accept then 'accepted' else 'declined' end
    where group_id = p_group and parent_id = auth.uid() and status = 'pending';
   if not found then raise exception 'There is no open invitation to answer'; end if;
-  select owner_id into owner from commute_groups where id = p_group;
-  perform notify(owner, 'invite', me.first_name || ' ' || case when p_accept then 'accepted' else 'declined' end || ' your invitation to share the school commute.');
+  select * into g from commute_groups where id = p_group;
+  perform notify(g.owner_id, 'invite', me.first_name || ' ' || case when p_accept then 'accepted' else 'declined' end || ' your invitation to share ' || trip_word(g.hub_id) || '.');
 end $$;
 
 create or replace function public.leave_group(p_group uuid)
@@ -349,10 +441,10 @@ returns void language sql security definer set search_path = public as $$
   delete from rota_slots where group_id = p_group and parent_id = auth.uid() and week_start >= date_trunc('week', now())::date;
 $$;
 
--- Builds the Monday-to-Friday rota for one week, sharing trips round-robin. Keeps an existing week as it is.
+-- Builds one week's rota on the hub's days, sharing trips round-robin. Keeps an existing week as it is.
 create or replace function public.build_rota(p_group uuid, p_week date)
 returns setof public.rota_slots language plpgsql security definer set search_path = public as $$
-declare members uuid[]; n int; d int; k text; wk date := date_trunc('week', p_week)::date; shift int;
+declare members uuid[]; n int; d int; i int := 0; k text; wk date := date_trunc('week', p_week)::date; shift int; ds smallint[];
 begin
   if not in_group(p_group) then raise exception 'You''re not in this commute'; end if;
   if not exists (select 1 from rota_slots where group_id = p_group and week_start = wk) then
@@ -361,12 +453,14 @@ begin
       union select parent_id from group_members where group_id = p_group and status = 'accepted') x;
     n := array_length(members, 1);
     if n < 2 then raise exception 'Invite at least one family who accepts before building a rota'; end if;
+    select array_agg(x order by x) into ds from (select distinct unnest(h.days) x from commute_groups g join hubs h on h.id = g.hub_id where g.id = p_group) y;
     shift := ((wk - date '2024-01-01') / 7) % n; -- rotate who gets the extra trips each week
-    foreach d in array array[0, 1, 2, 3, 4] loop
+    foreach d in array ds loop
       foreach k in array array['drop', 'pick'] loop
         -- Each day starts with the next family, so drop-offs and pick-ups both rotate.
-        insert into rota_slots (group_id, week_start, day, kind, parent_id) values (p_group, wk, d, k, members[((d + (k = 'pick')::int + shift) % n) + 1]);
+        insert into rota_slots (group_id, week_start, day, kind, parent_id) values (p_group, wk, d, k, members[((i + (k = 'pick')::int + shift) % n) + 1]);
       end loop;
+      i := i + 1;
     end loop;
   end if;
   return query select * from rota_slots where group_id = p_group and week_start = wk order by day, kind;

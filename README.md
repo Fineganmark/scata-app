@@ -1,6 +1,6 @@
 # Scata
 
-Safe, sustainable school commutes. A web app where schools invite parents, and parents share the school run.
+Safe, sustainable school commutes. Schools, sports clubs or parents set up a group, invite families, and families share the trips there (school runs, lifts to training, and so on). A family can belong to several groups.
 
 The whole app is `index.html` (Preact + htm, no build step). `config.js` holds the Google Maps browser key and the Supabase project address and public (anon) key. Without a Maps key, the app shows drawn maps instead of Google Maps.
 
