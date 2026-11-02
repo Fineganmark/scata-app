@@ -29,6 +29,9 @@ create table if not exists public.profiles (
   plus boolean not null default false,
   created_at timestamptz not null default now()
 );
+-- Scata admins (the people who run Scata) see and manage everything from the admin panel.
+-- Nobody can give this to themselves from the app; it is set in the SQL Editor (see README).
+alter table public.profiles add column if not exists is_admin boolean not null default false;
 
 -- Who belongs to each hub. Admins (the school, the coach, or the parent who set it up) manage it.
 create table if not exists public.hub_members (
@@ -162,6 +165,17 @@ language sql stable security definer set search_path = public as $$
                   where a.user_id = auth.uid() and a.role = 'admin' and b.user_id = other)
 $$;
 
+create or replace function public.is_platform_admin() returns boolean
+language sql stable security definer set search_path = public as $$
+  select coalesce((select is_admin from profiles where id = auth.uid()), false)
+$$;
+
+-- The group's own admins, and Scata admins, can manage a group.
+create or replace function public.can_manage_hub(h uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select is_hub_admin(h) or is_platform_admin()
+$$;
+
 create or replace function public.in_group(g uuid) returns boolean
 language sql stable security definer set search_path = public as $$
   select exists (select 1 from commute_groups where id = g and owner_id = auth.uid())
@@ -207,16 +221,16 @@ alter table public.locations enable row level security;
 alter table public.notifications enable row level security;
 
 drop policy if exists "read my hubs" on public.hubs;
-create policy "read my hubs" on public.hubs for select to authenticated using (public.in_hub(id));
+create policy "read my hubs" on public.hubs for select to authenticated using (public.in_hub(id) or public.is_platform_admin());
 drop policy if exists "admin edits hub" on public.hubs;
-create policy "admin edits hub" on public.hubs for update to authenticated using (public.is_hub_admin(id)) with check (public.is_hub_admin(id));
+create policy "admin edits hub" on public.hubs for update to authenticated using (public.can_manage_hub(id)) with check (public.can_manage_hub(id));
 
 drop policy if exists "read memberships" on public.hub_members;
-create policy "read memberships" on public.hub_members for select to authenticated using (user_id = auth.uid() or public.is_hub_admin(hub_id));
+create policy "read memberships" on public.hub_members for select to authenticated using (user_id = auth.uid() or public.can_manage_hub(hub_id));
 
 drop policy if exists "read profiles" on public.profiles;
 create policy "read profiles" on public.profiles for select to authenticated
-  using (id = auth.uid() or public.shares_group(id) or public.admin_of(id));
+  using (id = auth.uid() or public.shares_group(id) or public.admin_of(id) or public.is_platform_admin());
 drop policy if exists "edit own profile" on public.profiles;
 create policy "edit own profile" on public.profiles for update to authenticated using (id = auth.uid()) with check (id = auth.uid());
 
@@ -229,7 +243,7 @@ create policy "own commute" on public.commutes for all to authenticated
 
 drop policy if exists "admin invites" on public.hub_invites;
 create policy "admin invites" on public.hub_invites for all to authenticated
-  using (public.is_hub_admin(hub_id)) with check (public.is_hub_admin(hub_id));
+  using (public.can_manage_hub(hub_id)) with check (public.can_manage_hub(hub_id));
 
 drop policy if exists "read my groups" on public.commute_groups;
 create policy "read my groups" on public.commute_groups for select to authenticated
@@ -353,21 +367,6 @@ begin
   delete from hubs where id = p_hub and not exists (select 1 from hub_members where hub_id = p_hub);
 end $$;
 
--- An admin's view of the hub's families: who joined plus invited emails that have not joined yet.
-create or replace function public.hub_people(p_hub uuid)
-returns table (name text, email text, status text, joined_at timestamptz)
-language sql stable security definer set search_path = public as $$
-  select p.first_name || ' ' || p.last_name, u.email::text, case when m.role = 'admin' then 'admin' else 'active' end, m.created_at
-    from hub_members m join profiles p on p.id = m.user_id join auth.users u on u.id = m.user_id
-   where m.hub_id = p_hub and is_hub_admin(p_hub)
-  union all
-  select i.name, i.email, 'invited', i.created_at
-    from hub_invites i
-   where i.hub_id = p_hub and is_hub_admin(p_hub)
-     and not exists (select 1 from auth.users u join hub_members m on m.user_id = u.id where lower(u.email) = lower(i.email) and m.hub_id = i.hub_id)
-  order by 4 desc
-$$;
-
 create or replace function public.hub_stats(p_hub uuid)
 returns table (members bigint, commutes bigint, walk bigint, bike bigint, car bigint, bus bigint, groups bigint)
 language sql stable security definer set search_path = public as $$
@@ -378,7 +377,7 @@ language sql stable security definer set search_path = public as $$
          (select count(*) from commutes where hub_id = p_hub and accepted_terms and mode = 'car'),
          (select count(*) from commutes where hub_id = p_hub and accepted_terms and mode = 'bus'),
          (select count(*) from commute_groups where hub_id = p_hub)
-   where is_hub_admin(p_hub)
+   where can_manage_hub(p_hub)
 $$;
 
 -- Other families in the hub who have set up a commute. Shows a first name and rough distance only, never an address.
@@ -547,6 +546,197 @@ begin
 end $$;
 drop trigger if exists message_notify on public.messages;
 create trigger message_notify after insert on public.messages for each row execute function public.on_message();
+
+-- ---------- group admin tools (schools, clubs, and the parent who set a group up) ----------
+
+-- An admin's view of the group's people: who joined plus invited emails that have not joined yet.
+drop function if exists public.hub_people(uuid);
+create function public.hub_people(p_hub uuid)
+returns table (user_id uuid, name text, email text, status text, role text, commuting boolean, joined_at timestamptz)
+language sql stable security definer set search_path = public as $$
+  select m.user_id, p.first_name || ' ' || p.last_name, u.email::text, case when m.role = 'admin' then 'admin' else 'active' end, m.role,
+         exists (select 1 from commutes c where c.hub_id = m.hub_id and c.parent_id = m.user_id), m.created_at
+    from hub_members m join profiles p on p.id = m.user_id join auth.users u on u.id = m.user_id
+   where m.hub_id = p_hub and can_manage_hub(p_hub)
+  union all
+  select null, i.name, i.email, 'invited', null, false, i.created_at
+    from hub_invites i
+   where i.hub_id = p_hub and can_manage_hub(p_hub)
+     and not exists (select 1 from auth.users u join hub_members m on m.user_id = u.id where lower(u.email) = lower(i.email) and m.hub_id = i.hub_id)
+  order by 7 desc
+$$;
+
+-- The commute groups families have formed inside a group, for its admins.
+create or replace function public.hub_groups(p_hub uuid)
+returns table (id uuid, owner text, members text, pending bigint, created_at timestamptz)
+language sql stable security definer set search_path = public as $$
+  select g.id, p.first_name || ' ' || p.last_name,
+         coalesce((select string_agg(q.first_name || ' ' || q.last_name, ', ' order by q.first_name)
+                     from group_members m join profiles q on q.id = m.parent_id where m.group_id = g.id and m.status = 'accepted'), ''),
+         (select count(*) from group_members m where m.group_id = g.id and m.status = 'pending'),
+         g.created_at
+    from commute_groups g join profiles p on p.id = g.owner_id
+   where g.hub_id = p_hub and can_manage_hub(p_hub)
+   order by g.created_at
+$$;
+
+create or replace function public.set_hub_role(p_hub uuid, p_user uuid, p_role text)
+returns void language plpgsql security definer set search_path = public as $$
+declare h hubs;
+begin
+  if not can_manage_hub(p_hub) then raise exception 'Only the group''s admins can do that'; end if;
+  if p_role not in ('admin', 'member') then raise exception 'Choose admin or member'; end if;
+  if p_role = 'member' and not exists (select 1 from hub_members where hub_id = p_hub and role = 'admin' and user_id <> p_user) then
+    raise exception 'Every group needs at least one admin. Make someone else an admin first.';
+  end if;
+  update hub_members set role = p_role where hub_id = p_hub and user_id = p_user and role <> p_role;
+  if not found then return; end if;
+  select * into h from hubs where id = p_hub;
+  if p_user <> auth.uid() then
+    perform notify(p_user, 'school', case when p_role = 'admin' then 'You’re now an admin of ' || h.name || '.' else 'You’re no longer an admin of ' || h.name || '.' end);
+  end if;
+end $$;
+
+-- Takes someone out of a group: their commute, their places in its commute groups, and their future rota slots go.
+create or replace function public.remove_from_hub(p_hub uuid, p_user uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare h hubs;
+begin
+  if not can_manage_hub(p_hub) then raise exception 'Only the group''s admins can do that'; end if;
+  if p_user = auth.uid() then raise exception 'You can’t remove yourself here'; end if;
+  if not exists (select 1 from hub_members where hub_id = p_hub and user_id = p_user) then raise exception 'That person isn''t in this group'; end if;
+  if not exists (select 1 from hub_members where hub_id = p_hub and role = 'admin' and user_id <> p_user)
+     and exists (select 1 from hub_members where hub_id = p_hub and user_id <> p_user) then
+    raise exception 'They’re the only admin. Make someone else an admin first.';
+  end if;
+  select * into h from hubs where id = p_hub;
+  delete from rota_slots s using commute_groups g where s.group_id = g.id and g.hub_id = p_hub and s.parent_id = p_user and s.week_start >= date_trunc('week', now())::date;
+  delete from group_members m using commute_groups g where m.group_id = g.id and g.hub_id = p_hub and m.parent_id = p_user;
+  delete from commute_groups where hub_id = p_hub and owner_id = p_user;
+  delete from commutes where hub_id = p_hub and parent_id = p_user;
+  delete from hub_members where hub_id = p_hub and user_id = p_user;
+  delete from hub_invites i using auth.users u where u.id = p_user and i.hub_id = p_hub and lower(i.email) = lower(u.email);
+  perform notify(p_user, 'school', 'You were removed from ' || h.name || ' on Scata.');
+  delete from hubs where id = p_hub and not exists (select 1 from hub_members where hub_id = p_hub);
+end $$;
+
+-- Closes a group for everyone. Its commute groups, rotas and chats go with it.
+create or replace function public.delete_hub(p_hub uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare h hubs;
+begin
+  if not can_manage_hub(p_hub) then raise exception 'Only the group''s admins can do that'; end if;
+  select * into h from hubs where id = p_hub;
+  if h.id is null then return; end if;
+  perform notify(m.user_id, 'school', h.name || ' was closed on Scata.') from hub_members m where m.hub_id = p_hub and m.user_id <> auth.uid();
+  delete from hubs where id = p_hub;
+end $$;
+
+-- Ends one commute group (its rota, swaps and chat go too).
+create or replace function public.delete_commute_group(p_group uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare g commute_groups;
+begin
+  select * into g from commute_groups where id = p_group;
+  if g.id is null then return; end if;
+  if not can_manage_hub(g.hub_id) then raise exception 'Only the group''s admins can do that'; end if;
+  perform notify(x.pid, 'school', 'An admin of ' || (select name from hubs where id = g.hub_id) || ' ended a commute you shared there.')
+     from (select g.owner_id pid union select parent_id from group_members where group_id = p_group) x where x.pid <> auth.uid();
+  delete from commute_groups where id = p_group;
+end $$;
+
+-- ---------- Scata admin panel (people who run Scata; profiles.is_admin) ----------
+
+create or replace function public.admin_stats()
+returns table (accounts bigint, unconfirmed bigint, no_name bigint, plus bigint, hubs bigint, schools bigint, clubs bigint, others bigint,
+               memberships bigint, commutes bigint, groups bigint, messages bigint, new_week bigint)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not is_platform_admin() then raise exception 'Only Scata admins can do that'; end if;
+  return query select
+    (select count(*) from auth.users),
+    (select count(*) from auth.users where email_confirmed_at is null),
+    (select count(*) from auth.users u where not exists (select 1 from profiles p where p.id = u.id)),
+    (select count(*) from profiles where profiles.plus),
+    (select count(*) from public.hubs),
+    (select count(*) from public.hubs where kind = 'school'),
+    (select count(*) from public.hubs where kind = 'sport'),
+    (select count(*) from public.hubs where kind = 'other'),
+    (select count(*) from hub_members),
+    (select count(*) from public.commutes where accepted_terms),
+    (select count(*) from commute_groups),
+    (select count(*) from public.messages),
+    (select count(*) from auth.users where created_at > now() - interval '7 days');
+end $$;
+
+create or replace function public.admin_users()
+returns table (id uuid, email text, name text, plus boolean, is_admin boolean, confirmed boolean, created_at timestamptz, last_sign_in timestamptz, hubs text, children bigint)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not is_platform_admin() then raise exception 'Only Scata admins can do that'; end if;
+  return query
+  select u.id, u.email::text, case when p.id is null then null else p.first_name || ' ' || p.last_name end,
+         coalesce(p.plus, false), coalesce(p.is_admin, false), u.email_confirmed_at is not null, u.created_at, u.last_sign_in_at,
+         coalesce((select string_agg(h.name || case when m.role = 'admin' then ' (admin)' else '' end, ', ' order by m.created_at)
+                     from hub_members m join public.hubs h on h.id = m.hub_id where m.user_id = u.id), ''),
+         (select count(*) from public.children c where c.parent_id = u.id)
+    from auth.users u left join profiles p on p.id = u.id
+   order by u.created_at desc;
+end $$;
+
+create or replace function public.admin_hubs()
+returns table (id uuid, code text, kind text, name text, address text, created_at timestamptz, creator text, members bigint, admins bigint, commutes bigint, groups bigint)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not is_platform_admin() then raise exception 'Only Scata admins can do that'; end if;
+  return query
+  select h.id, h.code, h.kind, h.name, h.address, h.created_at,
+         (select p.first_name || ' ' || p.last_name from profiles p where p.id = h.created_by),
+         (select count(*) from hub_members m where m.hub_id = h.id),
+         (select count(*) from hub_members m where m.hub_id = h.id and m.role = 'admin'),
+         (select count(*) from public.commutes c where c.hub_id = h.id and c.accepted_terms),
+         (select count(*) from commute_groups g where g.hub_id = h.id)
+    from public.hubs h
+   order by h.created_at desc;
+end $$;
+
+create or replace function public.admin_set_plus(p_user uuid, p_on boolean)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if not is_platform_admin() then raise exception 'Only Scata admins can do that'; end if;
+  update profiles set plus = p_on where id = p_user;
+  if not found then raise exception 'That person hasn’t finished signing up yet'; end if;
+end $$;
+
+create or replace function public.admin_set_admin(p_user uuid, p_on boolean)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if not is_platform_admin() then raise exception 'Only Scata admins can do that'; end if;
+  if p_user = auth.uid() and not p_on then raise exception 'You can’t remove your own admin access here'; end if;
+  update profiles set is_admin = p_on where id = p_user;
+  if not found then raise exception 'That person hasn’t finished signing up yet'; end if;
+end $$;
+
+-- Deletes an account and everything it owns. A group it was the only admin of passes to its longest-standing member.
+create or replace function public.admin_delete_user(p_user uuid)
+returns void language plpgsql security definer set search_path = public, auth as $$
+declare orphaned uuid[];
+begin
+  if not is_platform_admin() then raise exception 'Only Scata admins can do that'; end if;
+  if p_user = auth.uid() then raise exception 'You can’t delete your own account here'; end if;
+  select array_agg(m.hub_id) into orphaned from hub_members m
+   where m.user_id = p_user and m.role = 'admin'
+     and not exists (select 1 from hub_members o where o.hub_id = m.hub_id and o.role = 'admin' and o.user_id <> p_user);
+  delete from auth.users where id = p_user;
+  if orphaned is not null then
+    update hub_members m set role = 'admin'
+      from (select distinct on (hub_id) hub_id, user_id from hub_members where hub_id = any(orphaned) order by hub_id, created_at) f
+     where m.hub_id = f.hub_id and m.user_id = f.user_id;
+    perform notify(m.user_id, 'school', 'You’re now the admin of ' || h.name || ' on Scata.')
+       from hub_members m join public.hubs h on h.id = m.hub_id where m.hub_id = any(orphaned) and m.role = 'admin';
+    delete from public.hubs h where h.id = any(orphaned) and not exists (select 1 from hub_members m where m.hub_id = h.id);
+  end if;
+end $$;
 
 grant execute on all functions in schema public to authenticated;
 revoke execute on function public.notify(uuid, text, text) from authenticated;
