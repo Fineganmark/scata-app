@@ -69,9 +69,9 @@ insert into public.children (parent_id, name, dob) values
   (pg_temp.u(12), 'Senan',  '2017-10-03');
 
 -- ---------- 3. the school and the club trip ----------
--- Greenfield National School (made up), Drumcondra, Dublin 9. Join code sca000101.
+-- Greenfield National School (made up), Drumcondra, Dublin 9. The address is a real street so maps geocode it. Join code sca000101.
 insert into public.hubs (id, code, kind, name, address, size, open_time, close_time, days, lat, lng, created_by, created_at)
-values ('de300000-0000-4000-8000-100000000001', 'sca000101', 'school', 'Greenfield National School (Demo)', 'D09 GF01', '200-400',
+values ('de300000-0000-4000-8000-100000000001', 'sca000101', 'school', 'Greenfield National School (Demo)', 'Home Farm Road, Drumcondra, Dublin 9', '200-400',
         '08:30-09:00', '14:30-15:00', '{0,1,2,3,4}', 53.3712, -6.2563, pg_temp.u(1), now() - interval '21 days');
 
 -- Drumcondra Juniors U12s (made up): one away match this coming Saturday. Join code sca000102.
