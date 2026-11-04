@@ -98,6 +98,7 @@ h3 { font-size: 17px; margin: 0; font-weight: 700; text-wrap: balance; }
 .grow { flex: 1; min-width: 0; }
 
 .btn { border: 0; border-radius: 10px; background: var(--btn); color: var(--btn-ink); font-weight: 700; padding: 13px 18px; width: 100%; font-size: 15px; }
+.btn svg { width: 18px; height: 18px; vertical-align: -3px; margin-right: 6px; }
 .btn:disabled { opacity: .4; cursor: not-allowed; }
 .btn.green { background: var(--green); color: #fff; width: auto; padding: 9px 14px; font-size: 14px; display: inline-flex; gap: 6px; align-items: center; }
 .btn.ghost { background: transparent; color: var(--ink); border: 1.5px solid var(--ink); }
@@ -303,9 +304,8 @@ const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
 
 /* ---------- maths ---------- */
 const SCHOOL_DAYS = 183, ROUND_KM = 10, EUR_PER_KM = 0.3, CO2_PER_KM = 0.17, MINS_PER_TRIP = 25;
-function savings(mode, groupSize, daysPerWeek = 5) {
-  // Yearly estimate for one family: each trip day (a school year of weeks) has a drop-off and a pick-up.
-  const trips = Math.round(SCHOOL_DAYS / 5 * daysPerWeek) * 2;
+function savings(mode, groupSize, trips) {
+  // Estimate for one family over the given number of one-way trips (see tripCount).
   const shareOfDriving = 1 / Math.max(1, groupSize);
   const carTripsAvoided = mode === 'car' ? trips * (1 - shareOfDriving) : trips;
   const km = carTripsAvoided * ROUND_KM;
@@ -516,7 +516,20 @@ function mondayOf(offset) {
   d.setDate(d.getDate() - dayIdx(d) + offset * 7); return d;
 }
 function weekNo(d) { const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); const n = t.getUTCDay() || 7; t.setUTCDate(t.getUTCDate() + 4 - n); const y = new Date(Date.UTC(t.getUTCFullYear(), 0, 1)); return Math.ceil(((t - y) / 864e5 + 1) / 7); }
-const slotLabel = (slot) => `${DAYS[slot.day]} ${slot.kind === 'drop' ? 'drop-off' : 'pick-up'}`;
+// A sports club group is a single trip on one date (trip_date) rather than a weekly commute.
+const isTrip = (h) => !!(h && h.kind === 'sport' && h.trip_date);
+const tripDay = (h) => new Date(h.trip_date + 'T12:00:00');
+const tripWhen = (h) => tripDay(h).toLocaleDateString('en-IE', { weekday: 'long', day: 'numeric', month: 'long' });
+const tripPast = (h) => isTrip(h) && isoDate(tripDay(h)) < isoDate(new Date());
+// How many weeks from this week the trip's week is.
+const tripWeek = (h) => { const d = tripDay(h); d.setDate(d.getDate() - dayIdx(d)); return Math.round((d - mondayOf(0)) / 6048e5); };
+const nextSaturday = () => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() + ((5 - dayIdx(d) + 7) % 7 || 7)); return isoDate(d); };
+// One-way trips a family makes: twice for a single trip, or a school year of drop-offs and pick-ups.
+const tripCount = (h) => isTrip(h) ? 2 : Math.round(SCHOOL_DAYS / 5 * h.days.length) * 2;
+const perTrips = (h) => isTrip(h) ? 'this trip' : 'a year';
+const estimateNote = (h) => isTrip(h) ? 'Estimate: 10 km round trip, there and back once.' : `Estimate: 10 km round trip, ${h.days.length} day${h.days.length > 1 ? 's' : ''} a week over a school year.`;
+const legName = (h, k) => kindOf(h).legs[k];
+const slotLabel = (slot, h) => isTrip(h) ? legName(h, slot.kind) : `${DAYS[slot.day]} ${legName(h, slot.kind)}`;
 // When a slot happens: its week's Monday + day, at the start of the commute's drop-off or pick-up window.
 function slotTime(slot, commute) {
   const d = new Date(slot.week_start + 'T00:00:00'); d.setDate(d.getDate() + slot.day);
@@ -531,9 +544,9 @@ async function geocode(address) {
 }
 // What each kind of group is called around the app.
 const KINDS = {
-  school: { label: 'School', icon: () => I.school, place: 'school', run: 'school run', trip: 'school trip', people: 'parents', address: 'Eircode', start: 'Opening time', end: 'Closing time', days: [0, 1, 2, 3, 4], commute: false, open: '08:30-09:30', close: '14:15-15:00' },
-  sport: { label: 'Sports club', icon: () => I.ball, place: 'club', run: 'lifts', trip: 'lift', people: 'families', address: 'Eircode or address', start: 'Session starts', end: 'Session ends', days: [5], commute: true, open: '09:30-10:00', close: '11:00-11:30' },
-  other: { label: 'Something else', icon: () => I.parent, place: 'group', run: 'trips', trip: 'trip', people: 'families', address: 'Eircode or address', start: 'Drop-off time', end: 'Pick-up time', days: [0, 1, 2, 3, 4], commute: true, open: '08:30-09:30', close: '14:15-15:00' },
+  school: { label: 'School', icon: () => I.school, place: 'school', run: 'school run', trip: 'school trip', people: 'parents', address: 'Eircode', start: 'Opening time', end: 'Closing time', legs: { drop: 'drop-off', pick: 'pick-up' }, days: [0, 1, 2, 3, 4], commute: false, open: '08:30-09:30', close: '14:15-15:00' },
+  sport: { label: 'Sports club', icon: () => I.ball, place: 'club', run: 'lifts', trip: 'lift', people: 'families', address: 'Venue: Eircode or address', start: 'Getting there', end: 'Heading home', legs: { drop: 'lift there', pick: 'lift home' }, days: [5], commute: true, open: '09:30-10:00', close: '11:00-11:30' },
+  other: { label: 'Something else', icon: () => I.parent, place: 'group', run: 'trips', trip: 'trip', people: 'families', address: 'Eircode or address', start: 'Drop-off time', end: 'Pick-up time', legs: { drop: 'drop-off', pick: 'pick-up' }, days: [0, 1, 2, 3, 4], commute: true, open: '08:30-09:30', close: '14:15-15:00' },
 };
 const kindOf = (h) => KINDS[(h && h.kind) || 'school'] || KINDS.school;
 // Shape the map helpers expect.
@@ -844,19 +857,21 @@ function JoinHub({ a }) {
 function NewHub({ a }) {
   const [kind, setKind] = useState('school');
   const k = KINDS[kind];
-  const [f, setF] = useState({ name: '', address: '', size: '100-200', open: k.open, close: k.close, days: k.days, commute: k.commute });
+  const [f, setF] = useState({ name: '', address: '', size: '100-200', open: k.open, close: k.close, days: k.days, commute: k.commute, trip_date: nextSaturday() });
   const [tried, setTried] = useState(false);
   const set = (key) => (v) => setF({ ...f, [key]: v });
   const pickKind = (kd) => { setKind(kd); const n = KINDS[kd]; setF({ ...f, open: n.open, close: n.close, days: n.days, commute: n.commute }); };
   const eirOk = /^[A-Za-z]\d[\dWw]\s?[A-Za-z0-9]{4}$/.test(f.address.trim());
   const addrOk = kind === 'school' ? eirOk : f.address.trim().length >= 3;
-  const ok = f.name.trim() && addrOk && f.days.length;
+  const single = kind === 'sport';
+  const dateOk = !!f.trip_date && f.trip_date >= isoDate(new Date());
+  const ok = f.name.trim() && addrOk && (single ? dateOk : f.days.length);
   const toggleDay = (i) => setF({ ...f, days: f.days.includes(i) ? f.days.filter(x => x !== i) : [...f.days, i].sort() });
   const submit = async (e) => {
     e.preventDefault(); setTried(true); if (!ok || a.busy) return;
     const address = eirOk ? f.address.toUpperCase().trim().replace(/^(\w{3})\s?(\w{4})$/, '$1 $2') : f.address.trim();
     const pos = await geocode(`${f.name}, ${address}, Ireland`) || await geocode(`${address}, Ireland`);
-    const hub = await a.run(() => rpc('create_hub', { p_kind: kind, p_name: f.name, p_address: address, p_size: kind === 'school' ? f.size : null, p_open: f.open, p_close: f.close, p_days: f.days, p_lat: pos && pos.lat, p_lng: pos && pos.lng, p_commute: f.commute }), `${f.name} is set up`);
+    const hub = await a.run(() => rpc('create_hub', { p_kind: kind, p_name: f.name, p_address: address, p_size: kind === 'school' ? f.size : null, p_open: f.open, p_close: f.close, p_days: f.days, p_lat: pos && pos.lat, p_lng: pos && pos.lng, p_commute: f.commute, p_trip_date: single ? f.trip_date : null }), `${f.name} is set up`);
     saveHub(hub.id); await a.reload({ hub: hub.id }); a.go(f.commute ? 'setup' : 'hubOverview');
   };
   return html`<main class="screen" style="padding-top:20px">
@@ -866,13 +881,14 @@ function NewHub({ a }) {
       <div class="who-card three">${Object.entries(KINDS).map(([kd, x]) => html`<button class=${kind === kd ? 'on' : ''} aria-pressed=${kind === kd} onClick=${() => pickKind(kd)}>${x.icon()}${x.label}</button>`)}</div>
     </div>
     <form class="form" onSubmit=${submit} id="hub-form">
-      <${Field} id="hb-name" label=${kind === 'school' ? 'School name' : kind === 'sport' ? 'Club or team name' : 'Group name'} value=${f.name} onInput=${set('name')} hint=${kind === 'other' ? 'e.g. Park Road school walk, or Swimming lessons' : ''} err=${tried && !f.name.trim() && 'Enter a name'} />
-      <${Field} id="hb-addr" label=${k.address} value=${f.address} onInput=${set('address')} hint=${`Where families travel to${kind === 'school' ? ', e.g. D12 TR83' : ''}`} err=${tried && !addrOk && (kind === 'school' ? 'Enter a 7-character Eircode, e.g. D12 TR83' : 'Enter where the group meets')} />
+      ${single ? html`<p class="small muted" style="margin:0">A sports club group is for one trip, like a match, a blitz or a gala. Families share the lift there and the lift home. Change the date afterwards to reuse it for the next one.</p>` : ''}
+      <${Field} id="hb-name" label=${kind === 'school' ? 'School name' : single ? 'Club and trip' : 'Group name'} value=${f.name} onInput=${set('name')} hint=${kind === 'other' ? 'e.g. Park Road school walk, or Swimming lessons' : single ? 'e.g. Crokes U12s, away match in Navan' : ''} err=${tried && !f.name.trim() && 'Enter a name'} />
+      <${Field} id="hb-addr" label=${k.address} value=${f.address} onInput=${set('address')} hint=${single ? 'Where the match or event is' : `Where families travel to${kind === 'school' ? ', e.g. D12 TR83' : ''}`} err=${tried && !addrOk && (kind === 'school' ? 'Enter a 7-character Eircode, e.g. D12 TR83' : 'Enter where the group meets')} />
       ${kind === 'school' ? html`<${Select} id="hb-size" label="Number of students" value=${f.size} onInput=${set('size')} options=${['0-100', '100-200', '200-400', '400-800', '800+']} />` : ''}
-      <div class="stack" style="gap:8px"><span>Which days do families travel?</span>
+      ${single ? html`<${Field} id="hb-date" label="Date of the trip" type="date" min=${isoDate(new Date())} value=${f.trip_date} onInput=${set('trip_date')} err=${tried && !dateOk && 'Pick today or a later date'} />` : html`<div class="stack" style="gap:8px"><span>Which days do families travel?</span>
         <div class="days">${DAYS.map((dn, i) => html`<button type="button" class=${f.days.includes(i) ? 'on' : ''} aria-pressed=${f.days.includes(i)} aria-label=${dn} onClick=${() => toggleDay(i)}>${dn.slice(0, 2)}</button>`)}</div>
         ${tried && !f.days.length ? html`<span class="err">Pick at least one day</span>` : ''}
-      </div>
+      </div>`}
       <div class="grid2">
         <${Field} id="hb-open" label=${k.start} value=${f.open} onInput=${set('open')} />
         <${Field} id="hb-close" label=${k.end} value=${f.close} onInput=${set('close')} />
@@ -891,7 +907,7 @@ function HubOverview({ a }) {
   const h = a.hub, k = a.kind;
   const fp = h.size ? footprint(h.size) : null;
   const ms = mapState(a);
-  const days = h.days.length === 5 && h.days.every((x, i) => x === i) ? 'Monday to Friday' : h.days.map(i => DAYS[i]).join(', ');
+  const days = isTrip(h) ? tripWhen(h) : h.days.length === 5 && h.days.every((x, i) => x === i) ? 'Monday to Friday' : h.days.map(i => DAYS[i]).join(', ');
   return html`<main class="screen">
     <div class="hello"><h1>Hi, ${a.profile.first_name}!</h1></div>
     <div class="stack" style="gap:8px">
@@ -900,6 +916,8 @@ function HubOverview({ a }) {
       <div class="row"><span style="width:22px;color:var(--ink-2)">${I.cal}</span><span>${days} · ${h.open_time} to ${h.close_time}</span></div>
     </div>
     <${SmartMap} s=${ms} variant="catchment" label=${`Map of the area within 1 and 3 km of ${h.name}`} />
+    ${tripPast(h) ? html`<div class="card note"><p style="margin:0">This trip has happened. To use the group for the next one, open <b>Families</b> in the menu, go to the <b>Group</b> tab and tap <b>Edit details</b> to change the date.</p></div>` : ''}
+    ${h.kind === 'sport' && !h.trip_date ? html`<div class="card note"><p style="margin:0">Add the date of the trip so families can share lifts to it: open <b>Families</b> in the menu, go to the <b>Group</b> tab and tap <b>Edit details</b>.</p></div>` : ''}
     ${fp ? html`<div class="card flat row" style="display:flex"><span style="width:26px;flex:none">${I.info}</span><span>On average the school commute for a school of ${h.size} students produces:</span></div>
     <div class="card"><div class="stats">
       <div>${I.car}<span class="big" style="font-size:18px">${fmt(fp.trips)}</span><span class="lbl">car trips per month</span></div>
@@ -970,7 +988,7 @@ function HubProfile({ a }) {
     <div><h2 class="title">${a.hub.name}</h2><div class="crumbs"><b>Dashboard</b>•<span>${tab === 'people' ? People : tab === 'commutes' ? 'Commutes' : 'Group'}</span></div></div>
     <${ProfileHero} name=${name} line1=${a.hub.name} line2=${`${k.label} · admin`} tabs=${tabs} />
     ${tab === 'profile' ? (editing ? html`<${HubEdit} a=${a} done=${() => setEditing(false)} />` : html`<div class="card">
-      ${[[k.address, a.hub.address], ...(a.hub.size ? [['Students', a.hub.size]] : []), ['Days', a.hub.days.map(i => DAYS[i].slice(0, 3)).join(', ')], [k.start, a.hub.open_time], [k.end, a.hub.close_time], ['Group code', a.hub.code], ['Your email', a.session.user.email]].map(([x, v]) => html`<div class="row between" style="display:flex"><span class="muted">${x}</span><b style="overflow-wrap:anywhere;text-align:right">${v}</b></div>`)}
+      ${[[k.address, a.hub.address], ...(a.hub.size ? [['Students', a.hub.size]] : []), isTrip(a.hub) ? ['Date', tripWhen(a.hub)] : ['Days', a.hub.days.map(i => DAYS[i].slice(0, 3)).join(', ')], [k.start, a.hub.open_time], [k.end, a.hub.close_time], ['Group code', a.hub.code], ['Your email', a.session.user.email]].map(([x, v]) => html`<div class="row between" style="display:flex"><span class="muted">${x}</span><b style="overflow-wrap:anywhere;text-align:right">${v}</b></div>`)}
       <div><button class="btn green" onClick=${() => setEditing(true)}>Edit details</button></div>
     </div>
     <div class="card danger-zone">
@@ -990,14 +1008,16 @@ function HubProfile({ a }) {
 // Edit a group's details (its admins, or a Scata admin).
 function HubEdit({ a, done }) {
   const h = a.hub, k = kindOf(h);
-  const [f, setF] = useState({ name: h.name, address: h.address, size: h.size || '100-200', open: h.open_time, close: h.close_time, days: [...h.days] });
+  const single = h.kind === 'sport';
+  const [f, setF] = useState({ name: h.name, address: h.address, size: h.size || '100-200', open: h.open_time, close: h.close_time, days: [...h.days], trip_date: h.trip_date || nextSaturday() });
   const [tried, setTried] = useState(false);
   const set = (key) => (v) => setF({ ...f, [key]: v });
-  const ok = f.name.trim() && f.address.trim().length >= 3 && f.days.length;
+  const ok = f.name.trim() && f.address.trim().length >= 3 && (single ? !!f.trip_date : f.days.length);
   const toggleDay = (i) => setF({ ...f, days: f.days.includes(i) ? f.days.filter(x => x !== i) : [...f.days, i].sort() });
   const save = async (e) => {
     e.preventDefault(); setTried(true); if (!ok || a.busy) return;
-    const patch = { name: f.name.trim(), address: f.address.trim(), open_time: f.open, close_time: f.close, days: f.days, ...(h.kind === 'school' ? { size: f.size } : {}) };
+    if (single && f.trip_date !== h.trip_date && h.trip_date && !confirm('Move the trip to the new date? The current lift rota will be cleared and a new one made for that day.')) return;
+    const patch = { name: f.name.trim(), address: f.address.trim(), open_time: f.open, close_time: f.close, ...(single ? { trip_date: f.trip_date } : { days: f.days }), ...(h.kind === 'school' ? { size: f.size } : {}) };
     if (patch.address !== h.address) { const pos = await geocode(`${patch.name}, ${patch.address}, Ireland`) || await geocode(`${patch.address}, Ireland`); if (pos) { patch.lat = pos.lat; patch.lng = pos.lng; } }
     await a.run(() => q(sb.from('hubs').update(patch).eq('id', h.id)), 'Group details saved');
     await a.reload(); done();
@@ -1007,10 +1027,10 @@ function HubEdit({ a, done }) {
     <${Field} id="he-name" label="Name" value=${f.name} onInput=${set('name')} err=${tried && !f.name.trim() && 'Enter a name'} />
     <${Field} id="he-addr" label=${k.address} value=${f.address} onInput=${set('address')} err=${tried && f.address.trim().length < 3 && 'Enter where the group meets'} />
     ${h.kind === 'school' ? html`<${Select} id="he-size" label="Number of students" value=${f.size} onInput=${set('size')} options=${['0-100', '100-200', '200-400', '400-800', '800+']} />` : ''}
-    <div class="stack" style="gap:8px"><span>Which days do families travel?</span>
+    ${single ? html`<${Field} id="he-date" label="Date of the trip" type="date" value=${f.trip_date} onInput=${set('trip_date')} hint="Change it to reuse this group for the next match or event" err=${tried && !f.trip_date && 'Pick a date'} />` : html`<div class="stack" style="gap:8px"><span>Which days do families travel?</span>
       <div class="days">${DAYS.map((dn, i) => html`<button type="button" class=${f.days.includes(i) ? 'on' : ''} aria-pressed=${f.days.includes(i)} aria-label=${dn} onClick=${() => toggleDay(i)}>${dn.slice(0, 2)}</button>`)}</div>
       ${tried && !f.days.length ? html`<span class="err">Pick at least one day</span>` : ''}
-    </div>
+    </div>`}
     <div class="grid2"><${Field} id="he-open" label=${k.start} value=${f.open} onInput=${set('open')} /><${Field} id="he-close" label=${k.end} value=${f.close} onInput=${set('close')} /></div>
     <div class="row"><button class="btn sm" type="submit" disabled=${a.busy}>Save</button><button class="btn ghost sm" type="button" onClick=${done}>Cancel</button></div>
   </form>`;
@@ -1082,9 +1102,9 @@ function Reports({ a }) {
   const [st, setSt] = useState(null);
   useEffect(() => { setSt(null); rpc('hub_stats', { p_hub: a.hub.id }).then(r => setSt(r[0] || null), e => a.say(e.message)); }, [a.hub.id]);
   if (!st) return html`<main class="screen"><div><h2 class="title">Reports</h2></div><p class="muted">Loading…</p></main>`;
-  const nd = a.hub.days.length;
-  const est = ['walk', 'bike', 'bus'].reduce((acc, m) => { const sv = savings(m, 1, nd); return { eur: acc.eur + sv.eur * st[m], co2: acc.co2 + sv.co2 * st[m] }; }, { eur: 0, co2: 0 });
-  const car = savings('car', 3, nd);
+  const nt = tripCount(a.hub);
+  const est = ['walk', 'bike', 'bus'].reduce((acc, m) => { const sv = savings(m, 1, nt); return { eur: acc.eur + sv.eur * st[m], co2: acc.co2 + sv.co2 * st[m] }; }, { eur: 0, co2: 0 });
+  const car = savings('car', 3, nt);
   const total = { eur: est.eur + car.eur * st.car, co2: est.co2 + car.co2 * st.car, hrs: car.hrs * st.car };
   const modes = [['car', 'Car', 'var(--green)'], ['bike', 'Bike', 'var(--amber)'], ['bus', 'Public', 'var(--blue)'], ['walk', 'Walk', 'var(--red)']];
   const anyTrips = Number(st.commutes) > 0;
@@ -1095,7 +1115,7 @@ function Reports({ a }) {
       <div>${I.route}<span class="big">${st.commutes}</span><span class="lbl">commutes set up</span></div>
       <div>${I.car}<span class="big">${st.groups}</span><span class="lbl">sharing groups</span></div>
     </div></div>
-    <div class="card"><h3>Estimated yearly savings</h3><${Stats} s=${total} labels=${['a year', 'CO₂ a year', 'parent time']} /><p class="demo-note" style="margin:0">Estimate from each family’s chosen travel mode, 10 km round trip, ${nd} day${nd > 1 ? 's' : ''} a week over a school year.</p></div>
+    <div class="card"><h3>${isTrip(a.hub) ? 'Estimated savings on this trip' : 'Estimated yearly savings'}</h3><${Stats} s=${total} labels=${isTrip(a.hub) ? ['this trip', 'CO₂ this trip', 'parent time'] : ['a year', 'CO₂ a year', 'parent time']} /><p class="demo-note" style="margin:0">Estimate from each family’s chosen travel mode, ${isTrip(a.hub) ? '10 km round trip, there and back once.' : `10 km round trip, ${a.hub.days.length} day${a.hub.days.length > 1 ? 's' : ''} a week over a school year.`}</p></div>
     <div class="card">
       <h3>Commutes by travel type</h3>
       ${anyTrips ? html`<${Pie} data=${modes.filter(([m]) => Number(st[m]) > 0).map(([m, , c]) => ({ v: Number(st[m]), c }))} />
@@ -1221,7 +1241,7 @@ function Setup({ a }) {
   return html`<main class="screen">
     <${Hello} a=${a} />
     <div class="card" style="gap:18px">
-      <h3 class="center">Before we reach out, we need to know a little bit more about your trips to ${a.hub.name}</h3>
+      <h3 class="center">Before we reach out, we need to know a little bit more about your trips to ${a.hub.name}${isTrip(a.hub) ? ` on ${tripWhen(a.hub)}` : ''}</h3>
       ${needKid ? html`<div class="stack" style="gap:12px"><span class="center">Your child</span>
         <div class="grid2">
           <${Field} id="su-child" label="Child’s first name" value=${kid.name} onInput=${v => setKid({ ...kid, name: v })} err=${tried && !kid.name.trim() && 'Enter a name'} />
@@ -1236,8 +1256,8 @@ function Setup({ a }) {
       </div>
       <div class="stack" style="gap:18px"><span class="center">Where do you leave from, and when?</span>
         <${Field} id="su-home" label="Home Eircode or address" value=${c.home || ''} onInput=${v => set('home', v)} hint="Only used to find families near you. Other parents never see it." err=${tried && !c.home && 'Enter your Eircode or address'} />
-        <${Field} id="su-drop" label="Drop off time" value=${c.drop_time} onInput=${v => set('drop_time', v)} />
-        <${Field} id="su-pick" label="Pick up time" value=${c.pick_time} onInput=${v => set('pick_time', v)} />
+        <${Field} id="su-drop" label=${isTrip(a.hub) ? 'Lift there' : 'Drop off time'} value=${c.drop_time} onInput=${v => set('drop_time', v)} />
+        <${Field} id="su-pick" label=${isTrip(a.hub) ? 'Lift home' : 'Pick up time'} value=${c.pick_time} onInput=${v => set('pick_time', v)} />
       </div>
     </div>
     <div class="action"><button class="btn" disabled=${a.busy} onClick=${save}>${a.busy ? 'Saving…' : 'Let’s Go!'}</button></div>
@@ -1257,8 +1277,7 @@ function Match({ a }) {
   const [nearby] = useNearby(a);
   const close = (nearby || []).filter(n => n.km == null || n.km <= 5);
   const kids = close.reduce((s, n) => s + Number(n.kids || 0), 0);
-  const nd = a.hub.days.length;
-  const sv = savings(mode, Math.min(a.commute.seats, close.length) + 1, nd);
+  const sv = savings(mode, Math.min(a.commute.seats, close.length) + 1, tripCount(a.hub));
   const ms = { ...mapState(a), commute: { ...mapState(a).commute, mode } };
   return html`<main class="screen">
     <${Hello} a=${a} />
@@ -1267,8 +1286,8 @@ function Match({ a }) {
       <p style="margin:0;font-size:16px">${nearby === null ? 'Looking for families near you…' : close.length ? html`There ${close.length === 1 ? 'is' : 'are'} <b>${close.length}</b> ${close.length === 1 ? 'family' : 'families'} (${kids} ${kids === 1 ? 'child' : 'children'}) within 5 km going to ${a.hub.name}.` : `No other families in ${a.hub.name} have set up their trips yet. You can still set yours up now, and we’ll show them here as they join.`}</p>
       <p style="margin:0"><b>${MODE_NAME[mode]}</b> together could save you up to</p>
       <div class="choice">${['walk', 'bike', 'car', 'bus'].map(m => html`<button class=${'mode' + (mode === m ? ' on' : '')} aria-pressed=${mode === m} aria-label=${MODE_NAME[m]} onClick=${() => setMode(m)}>${MODE_ICON[m]}</button>`)}</div>
-      <${Stats} s=${sv} labels=${['a year', 'CO₂ a year', 'a year']} />
-      <p class="demo-note" style="margin:0">Estimate: 10 km round trip, ${nd} day${nd > 1 ? 's' : ''} a week over a school year.</p>
+      <${Stats} s=${sv} labels=${[perTrips(a.hub), 'CO₂ ' + perTrips(a.hub), perTrips(a.hub)]} />
+      <p class="demo-note" style="margin:0">${estimateNote(a.hub)}</p>
     </div>
     <div class="action"><button class="btn" disabled=${a.busy} onClick=${async () => { if (mode !== a.commute.mode) await a.run(() => a.updateCommute({ mode })); await a.reload(); a.go(a.commute.accepted_terms ? 'manage' : 'terms'); }}>Let’s Go!</button></div>
   </main>`;
@@ -1319,7 +1338,7 @@ function Manage({ a }) {
   const kidsIn = accepted.reduce((s, m) => s + Number(m.kids || 0), 0) + (a.children || []).length;
   const left = Math.max(0, capacity - kidsIn);
   const inOther = (a.groups || []).filter(g => !g.mine && g.status === 'accepted');
-  const sv = savings(a.commute.mode, Math.max(accepted.length, inOther.length ? (a.people[inOther[0].id] || []).filter(p => p.status === 'accepted').length - 1 : 0) + 1, a.hub.days.length);
+  const sv = savings(a.commute.mode, Math.max(accepted.length, inOther.length ? (a.people[inOther[0].id] || []).filter(p => p.status === 'accepted').length - 1 : 0) + 1, tripCount(a.hub));
   const invite = async (n) => { await a.run(() => rpc('invite_parent', { p_hub: a.hub.id, p_target: n.parent_id }), `Invite sent to ${n.first_name}`); await a.reload(); refresh(); };
   const canRota = a.gid != null && (a.people[a.gid] || []).filter(p => p.status === 'accepted').length > 1;
   return html`<main class="screen">
@@ -1340,7 +1359,7 @@ function Manage({ a }) {
         : html`<span class=${'status ' + n.status}>${n.status === 'accepted' ? '✓ Accepted' : 'Pending'}</span>`}
     </div>`)}
     ${inOther.length ? html`<div class="card flat"><span>You’re also in ${inOther.map(g => ((a.people[g.id] || []).find(p => p.is_owner) || {}).first_name).join(' and ')}’s commute.</span></div>` : ''}
-    <div class="center stack" style="gap:4px"><h3>Build this commute?</h3><span class="muted">Sharing the ${a.kind.run} could save you each year:</span></div>
+    <div class="center stack" style="gap:4px"><h3>Build this commute?</h3><span class="muted">Sharing the ${a.kind.run} could save you ${isTrip(a.hub) ? `on ${tripWhen(a.hub)}` : 'each year'}:</span></div>
     <div class="card"><${Stats} s=${sv} /></div>
     <${Action} disabled=${!canRota} onClick=${() => a.go('calendar')}>${canRota ? 'See the rota' : 'Waiting for a family to accept'}<//>
   </main>`;
@@ -1380,18 +1399,20 @@ function SwapRequests({ a, onDone }) {
 
 function Calendar({ a }) {
   const days = a.hub.days;
-  // After this week's last trip day, start on next week.
-  const [offset, setOffset] = useState(dayIdx(new Date()) > Math.max(...days) ? 1 : 0);
+  const single = isTrip(a.hub);
+  // A single trip shows its own week. Otherwise, after this week's last trip day, start on next week.
+  const [offset, setOffset] = useState(single ? tripWeek(a.hub) : dayIdx(new Date()) > Math.max(...days) ? 1 : 0);
+  useEffect(() => { if (single) setOffset(tripWeek(a.hub)); }, [a.hub.trip_date]);
   const [swapFrom, setSwapFrom] = useState(null);
   const { slots, err, mon, load } = useRota(a, offset);
   if (!a.gid) return html`<main class="screen"><${Hello} a=${a} /><div class="card note"><h3>No rota yet</h3><p style="margin:0">Once a family accepts your invite, or you accept theirs, your rota appears here.</p></div><${Action} onClick=${() => a.go('manage')}>Invite families<//></main>`;
   const people = a.people[a.gid] || [];
   const who = (id) => id === a.uid ? 'You' : ((people.find(p => p.parent_id === id) || {}).first_name || 'A parent');
   const members = people.filter(p => p.status === 'accepted').length;
-  const per = members ? days.length * 2 / members : 0;
+  const per = members ? (single ? 2 : days.length * 2) / members : 0;
   const dayDate = (i) => { const x = new Date(mon); x.setDate(x.getDate() + i); return x; };
   const times = { drop: a.commute.drop_time, pick: a.commute.pick_time };
-  const past = offset < 0;
+  const past = single ? tripPast(a.hub) : offset < 0;
   const shownDays = [...new Set([...days, ...(slots || []).map(s => s.day)])].sort();
   const tapSlot = async (slot) => {
     if (!swapFrom || past) return;
@@ -1403,15 +1424,16 @@ function Calendar({ a }) {
   return html`<main class="screen">
     <${GroupPicker} a=${a} />
     <${SwapRequests} a=${a} onDone=${load} />
-    <div class="card note"><h3>Trip overview</h3><p style="margin:0">${members} families, ${days.length} day${days.length > 1 ? 's' : ''}: that’s ${per % 1 ? per.toFixed(1) : per} trip${per === 1 ? '' : 's'} each!</p></div>
-    ${swapFrom ? html`<div class="card flat" style="background:var(--surface)"><span><b>Swapping your ${slotLabel(slots.find(x => x.id === swapFrom))}.</b> Tap the slot you’d like instead.</span><button class="btn sm ghost" onClick=${() => setSwapFrom(null)}>Cancel swap</button></div>` : ''}
+    <div class="card note"><h3>Trip overview</h3><p style="margin:0">${single ? html`<b>${tripWhen(a.hub)}</b> at ${a.hub.address}. ${members} families share 2 lifts: one there and one home.${members > 2 ? ' The families not driving travel as passengers.' : ''}` : `${members} families, ${days.length} day${days.length > 1 ? 's' : ''}: that’s ${per % 1 ? per.toFixed(1) : per} trip${per === 1 ? '' : 's'} each!`}</p></div>
+    ${single && past ? html`<div class="card flat"><span>This trip has happened. ${a.isAdmin ? 'To reuse the group for the next one, change the date under Families → Group → Edit details.' : 'The club can set a new date for the next one.'}</span></div>` : ''}
+    ${swapFrom ? html`<div class="card flat" style="background:var(--surface)"><span><b>Swapping your ${slotLabel(slots.find(x => x.id === swapFrom), a.hub)}.</b> Tap the slot you’d like instead.</span><button class="btn sm ghost" onClick=${() => setSwapFrom(null)}>Cancel swap</button></div>` : ''}
     <div class="card" style="padding:0;gap:0;overflow:hidden">
-      <div style="padding:14px 16px"><h3>Calendar</h3></div>
-      <div class="cal-nav" style="padding:6px 8px 12px">
+      <div style="padding:14px 16px"><h3>${single ? 'Lift rota' : 'Calendar'}</h3></div>
+      ${single ? '' : html`<div class="cal-nav" style="padding:6px 8px 12px">
         <button class="iconbtn" aria-label="Previous week" onClick=${() => { setSwapFrom(null); setOffset(offset - 1); }}>${I.chevL}</button>
         <span>${mon.toLocaleDateString('en-IE', { month: 'long', year: 'numeric' })}, Week ${weekNo(mon)}</span>
         <button class="iconbtn" aria-label="Next week" onClick=${() => { setSwapFrom(null); setOffset(offset + 1); }}>${I.chevR}</button>
-      </div>
+      </div>`}
       ${err ? html`<p class="muted" style="padding:0 16px 16px;margin:0">${err}</p>` : ''}
       ${slots === null ? html`<p class="muted" style="padding:0 16px 16px;margin:0">Loading…</p>` : ''}
       ${slots && !slots.length && !err ? html`<p class="muted" style="padding:0 16px 16px;margin:0">No rota for this week.</p>` : ''}
@@ -1419,7 +1441,7 @@ function Calendar({ a }) {
         <div class="cal-head"><span>${DAYS[i]}</span><span>${dayDate(i).toLocaleDateString('en-IE', { month: 'long', day: 'numeric' })}</span></div>
         ${slots.filter(x => x.day === i).sort((x, y) => x.kind < y.kind ? -1 : 1).map(slot => { const mine = slot.parent_id === a.uid;
           return html`<div class=${'cal-slot' + (mine ? ' mine' : '') + (swapFrom && !mine ? ' picking' : '')} onClick=${() => tapSlot(slot)}>
-            <div class="cal-who"><span class="small" style="min-width:92px">${times[slot.kind]}</span><span class=${'dot' + (slot.confirmed ? '' : ' amber')}></span><span>${who(slot.parent_id)}</span></div>
+            <div class="cal-who"><span class="small" style="min-width:92px">${single ? html`<b>${legName(a.hub, slot.kind)[0].toUpperCase() + legName(a.hub, slot.kind).slice(1)}</b><br/>` : ''}${times[slot.kind]}</span><span class=${'dot' + (slot.confirmed ? '' : ' amber')}></span><span>${who(slot.parent_id)}</span></div>
             ${past ? '' : html`<div class="row" style="gap:6px">${mine ? html`
               ${slot.confirmed ? html`<span class="status accepted small">Confirmed</span>` : html`<button class="pill" onClick=${async e => { e.stopPropagation(); await a.run(() => rpc('confirm_slot', { p_slot: slot.id }), 'Slot confirmed'); load(); }}>Confirm</button>`}
               <button class="pill violet" onClick=${e => { e.stopPropagation(); setSwapFrom(slot.id); }}>Swap</button>`
@@ -1428,11 +1450,11 @@ function Calendar({ a }) {
       </div>`) : ''}
     </div>
     <div class="card note">
-      <p style="margin:0">We share the trips out in turn. When the numbers don’t divide evenly, the extra trips move to a different family each week.</p>
+      <p style="margin:0">${single ? 'One family drives there and another drives home, so nobody does both.' : 'We share the trips out in turn. When the numbers don’t divide evenly, the extra trips move to a different family each week.'}</p>
       <p style="margin:0">Tap <b>Confirm</b> on your slot. If a slot doesn’t work for you, tap <b>Swap</b> and pick another parent’s slot. Once they agree, both slots are confirmed.</p>
       <div class="row" style="justify-content:center;gap:16px;font-size:13px"><span class="row" style="gap:6px"><span class="dot"></span>Confirmed</span><span class="row" style="gap:6px"><span class="dot amber"></span>Waiting</span></div>
     </div>
-    ${(a.groups || []).some(g => g.mine && g.id === a.gid) && !past ? html`<button class="btn ghost" disabled=${a.busy} onClick=${async () => { await a.run(() => rpc('rebuild_rota', { p_group: a.gid, p_week: isoDate(mon) }), 'Rota rebuilt for this week'); load(); }}>Rebuild this week’s rota</button>` : ''}
+    ${(a.groups || []).some(g => g.mine && g.id === a.gid) && !past ? html`<button class="btn ghost" disabled=${a.busy} onClick=${async () => { await a.run(() => rpc('rebuild_rota', { p_group: a.gid, p_week: isoDate(mon) }), single ? 'Lift rota rebuilt' : 'Rota rebuilt for this week'); load(); }}>${single ? 'Rebuild the lift rota' : 'Rebuild this week’s rota'}</button>` : ''}
     <${Action} onClick=${() => a.go('trip')}>Next ${a.kind.trip}<//>
   </main>`;
 }
@@ -1444,7 +1466,7 @@ function useNextTrip(a) {
     if (!a.gid) { setTrip(null); return; }
     (async () => {
       const soon = Date.now() - 45 * 60000;
-      for (const off of [0, 1]) {
+      for (const off of isTrip(a.hub) ? [tripWeek(a.hub)] : [0, 1]) {
         let slots;
         try { slots = await rpc('build_rota', { p_group: a.gid, p_week: isoDate(mondayOf(off)) }); } catch (e) { setTrip(null); return; }
         const next = slots.map(s => ({ ...s, at: slotTime(s, a.commute) })).filter(s => s.at.getTime() > soon).sort((x, y) => x.at - y.at)[0];
@@ -1452,7 +1474,7 @@ function useNextTrip(a) {
       }
       setTrip(null);
     })();
-  }, [a.gid]);
+  }, [a.gid, a.hub.trip_date]);
   return trip;
 }
 
@@ -1467,14 +1489,15 @@ function NextTrip({ a }) {
   const driver = mine ? 'You' : ((a.people[a.gid] || []).find(p => p.parent_id === slot.parent_id) || {}).first_name || 'A parent';
   const t = (slot.kind === 'drop' ? a.commute.drop_time : a.commute.pick_time).split('-')[0];
   const daysAway = Math.round((new Date(slot.at).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / 864e5);
-  const when = daysAway === 0 ? 'today' : daysAway === 1 ? 'tomorrow' : daysAway > 6 ? `next ${DAYS[slot.day]}` : DAYS[slot.day];
+  const when = daysAway === 0 ? 'today' : daysAway === 1 ? 'tomorrow' : isTrip(a.hub) ? `on ${tripWhen(a.hub)}` : daysAway > 6 ? `next ${DAYS[slot.day]}` : DAYS[slot.day];
+  const leg = legName(a.hub, slot.kind);
   const kids = (a.people[a.gid] || []).filter(p => p.status === 'accepted').reduce((s, p) => s + Number(p.kids || 0), 0);
   const ms = mapState(a);
   return html`<main class="screen">
     <${Hello} a=${a} />
     <div class="card note">
       <h3>${title[0].toUpperCase() + title.slice(1)}</h3>
-      <p style="margin:0">${mine ? html`You’re doing <b>${slot.kind === 'drop' ? 'drop-off' : 'pick-up'}</b> ${when}. Leave at <b>${t}</b>.` : html`<b>${driver}</b> is doing ${slot.kind === 'drop' ? 'drop-off' : 'pick-up'} ${when} at <b>${t}</b>.`}</p>
+      <p style="margin:0">${mine ? html`You’re doing the <b>${leg}</b> ${when}. Leave at <b>${t}</b>.` : html`<b>${driver}</b> is doing the ${leg} ${when} at <b>${t}</b>.`}</p>
     </div>
     <${SmartMap} s=${ms} variant="trip" onInfo=${setInfo} />
     <${MapLink} href=${gmDirections(ms)}>Get directions in Google Maps<//>
@@ -1601,7 +1624,7 @@ function ParentProfile({ a }) {
   return html`<main class="screen">
     <div><h2 class="title">My profile</h2><div class="crumbs"><b>Dashboard</b>•<span>Profile</span></div></div>
     <${ProfileHero} name=${name} line1=${a.hub ? a.hub.name : 'No group yet'} line2=${(a.profile.plus ? 'Scata Plus · ' : '') + a.session.user.email} tabs=${''} />
-    ${a.commuting ? html`<div class="card"><${Stats} s=${savings(a.commute.mode, Math.max(1, accepted), a.hub.days.length)} labels=${['saved a year', 'saved a year', 'saved a year']} /></div>` : ''}
+    ${a.commuting ? html`<div class="card"><${Stats} s=${savings(a.commute.mode, Math.max(1, accepted), tripCount(a.hub))} labels=${Array(3).fill('saved ' + perTrips(a.hub))} /></div>` : ''}
     <div class="stack">
       <div><h3>My groups</h3><p class="muted small" style="margin:4px 0 0">Schools, clubs and groups you belong to</p></div>
       <div class="table">
@@ -1645,7 +1668,7 @@ function Commutes({ a }) {
     <div><h2 class="title">Commutes</h2><div class="crumbs"><b>Dashboard</b>•<span>Commutes</span></div></div>
     <${GroupPicker} a=${a} />
     <div class="card">
-      <div class="row"><span class="mode on" style="width:48px;height:48px;cursor:default">${MODE_ICON[a.commute.mode]}</span><div class="grow"><b>${run} · ${a.hub.name}</b><div class="muted small">${MODE_NAME[a.commute.mode]} · drop-off ${a.commute.drop_time} · pick-up ${a.commute.pick_time}</div></div></div>
+      <div class="row"><span class="mode on" style="width:48px;height:48px;cursor:default">${MODE_ICON[a.commute.mode]}</span><div class="grow"><b>${run} · ${a.hub.name}</b><div class="muted small">${MODE_NAME[a.commute.mode]}${isTrip(a.hub) ? ` · ${tripWhen(a.hub)}` : ''} · ${legName(a.hub, 'drop')} ${a.commute.drop_time} · ${legName(a.hub, 'pick')} ${a.commute.pick_time}</div></div></div>
       <div class="row between" style="display:flex"><span class="muted">Families sharing</span><b>${accepted.length + 1}</b></div>
       <div class="row" style="flex-wrap:wrap;gap:8px">${accepted.map(p => html`<span class="row" style="gap:6px;background:var(--surface);border-radius:20px;padding:4px 10px 4px 4px"><${Avatar} name=${p.first_name + ' ' + p.last_name} size="sm" /><span class="small">${p.first_name} ${p.last_name}</span></span>`)}</div>
       <div class="row" style="gap:8px"><button class="btn sm ghost" onClick=${() => a.go('calendar')}>Calendar</button><button class="btn sm ghost" onClick=${() => a.go('manage')}>Manage</button><button class="btn sm ghost" onClick=${() => a.go('setup')}>Edit</button></div>
