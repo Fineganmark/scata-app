@@ -21,6 +21,8 @@ create table if not exists public.hubs (
   created_by uuid references auth.users on delete set null,
   created_at timestamptz not null default now()
 );
+-- A sports club group is one trip (a match, a blitz, a gala): the day it happens. Schools and other groups leave it empty and run every week.
+alter table public.hubs add column if not exists trip_date date;
 
 create table if not exists public.profiles (
   id uuid primary key references auth.users on delete cascade,
@@ -201,8 +203,34 @@ revoke execute on function public.notify(uuid, text, text) from public, anon, au
 -- How a hub's trip is described in messages.
 create or replace function public.trip_word(h uuid) returns text
 language sql stable security definer set search_path = public as $$
-  select case kind when 'school' then 'the school run to ' else 'trips to ' end || name from hubs where id = h
+  select case when kind = 'school' then 'the school run to ' || name
+              when kind = 'sport' and trip_date is not null then 'lifts to ' || name || ' on ' || to_char(trip_date, 'Dy DD Mon')
+              else 'trips to ' || name end from hubs where id = h
 $$;
+
+-- How one rota slot is described: a drop-off or pick-up, or for a single trip the lift there or the lift home.
+create or replace function public.slot_word(s public.rota_slots) returns text
+language sql stable security definer set search_path = public as $$
+  select case when h.kind = 'sport' and h.trip_date is not null
+              then to_char(s.week_start + s.day, 'Dy DD Mon') || ' ' || case s.kind when 'drop' then 'lift there' else 'lift home' end
+              else to_char(s.week_start + s.day, 'Dy DD Mon') || ' ' || case s.kind when 'drop' then 'drop-off' else 'pick-up' end end
+    from commute_groups g join hubs h on h.id = g.hub_id where g.id = s.group_id
+$$;
+
+-- A single trip runs on its own day only. Moving it to a new date (the next match) clears the old rota so a fresh one is built.
+create or replace function public.on_hub_trip() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.kind = 'sport' and new.trip_date is not null then
+    new.days := array[(extract(isodow from new.trip_date)::int - 1)]::smallint[];
+  end if;
+  if tg_op = 'UPDATE' and new.trip_date is distinct from old.trip_date then
+    delete from rota_slots s using commute_groups g where s.group_id = g.id and g.hub_id = new.id;
+  end if;
+  return new;
+end $$;
+drop trigger if exists hub_trip on public.hubs;
+create trigger hub_trip before insert or update on public.hubs for each row execute function public.on_hub_trip();
 
 -- ---------- row level security ----------
 
@@ -281,7 +309,7 @@ grant update (first_name, last_name, plus) on public.profiles to authenticated;
 revoke update on public.notifications from authenticated;
 grant update (read) on public.notifications to authenticated;
 revoke update on public.hubs from authenticated;
-grant update (name, address, size, open_time, close_time, days, lat, lng) on public.hubs to authenticated;
+grant update (name, address, size, open_time, close_time, days, lat, lng, trip_date) on public.hubs to authenticated;
 revoke insert, update, delete on public.hub_members, public.commute_groups, public.group_members, public.rota_slots, public.swap_requests from authenticated;
 revoke insert on public.hubs from authenticated;
 
@@ -303,19 +331,23 @@ begin
 end $$;
 
 -- Anyone signed in can set up a hub and becomes its admin. p_commute adds the creator as a family sharing trips there too.
-create or replace function public.create_hub(p_kind text, p_name text, p_address text, p_size text, p_open text, p_close text, p_days smallint[], p_lat double precision default null, p_lng double precision default null, p_commute boolean default false)
+-- A sports club group is a single trip, so it needs p_trip_date.
+drop function if exists public.create_hub(text, text, text, text, text, text, smallint[], double precision, double precision, boolean);
+create or replace function public.create_hub(p_kind text, p_name text, p_address text, p_size text, p_open text, p_close text, p_days smallint[], p_lat double precision default null, p_lng double precision default null, p_commute boolean default false, p_trip_date date default null)
 returns public.hubs language plpgsql security definer set search_path = public as $$
 declare h hubs; c text;
 begin
   if not exists (select 1 from profiles where id = auth.uid()) then raise exception 'Please add your name first'; end if;
   if trim(coalesce(p_name, '')) = '' then raise exception 'Give the group a name'; end if;
+  if p_kind = 'sport' and p_trip_date is null then raise exception 'Pick the day of the trip'; end if;
   if (select count(*) from hub_members where user_id = auth.uid() and role = 'admin') >= 20 then raise exception 'You already manage 20 groups'; end if;
   loop
     c := 'sca' || lpad((floor(random() * 1000000))::int::text, 6, '0');
     exit when not exists (select 1 from hubs where code = c);
   end loop;
-  insert into hubs (code, kind, name, address, size, open_time, close_time, days, lat, lng, created_by)
-    values (c, p_kind, trim(p_name), trim(p_address), nullif(p_size, ''), p_open, p_close, coalesce(p_days, '{0,1,2,3,4}'), p_lat, p_lng, auth.uid()) returning * into h;
+  insert into hubs (code, kind, name, address, size, open_time, close_time, days, lat, lng, created_by, trip_date)
+    values (c, p_kind, trim(p_name), trim(p_address), nullif(p_size, ''), p_open, p_close, coalesce(p_days, '{0,1,2,3,4}'), p_lat, p_lng, auth.uid(),
+            case when p_kind = 'sport' then p_trip_date end) returning * into h;
   insert into hub_members (hub_id, user_id, role) values (h.id, auth.uid(), 'admin');
   if p_commute then insert into commutes (parent_id, hub_id, drop_time, pick_time) values (auth.uid(), h.id, h.open_time, h.close_time); end if;
   return h;
@@ -341,11 +373,12 @@ begin
 end $$;
 
 -- My hubs, with my role and whether I share trips there.
-create or replace function public.my_hubs()
-returns table (id uuid, code text, kind text, name text, address text, size text, open_time text, close_time text, days smallint[], lat double precision, lng double precision, role text, commuting boolean)
+drop function if exists public.my_hubs();
+create function public.my_hubs()
+returns table (id uuid, code text, kind text, name text, address text, size text, open_time text, close_time text, days smallint[], lat double precision, lng double precision, role text, commuting boolean, trip_date date)
 language sql stable security definer set search_path = public as $$
   select h.id, h.code, h.kind, h.name, h.address, h.size, h.open_time, h.close_time, h.days, h.lat, h.lng, m.role,
-         exists (select 1 from commutes c where c.hub_id = h.id and c.parent_id = auth.uid())
+         exists (select 1 from commutes c where c.hub_id = h.id and c.parent_id = auth.uid()), h.trip_date
     from hub_members m join hubs h on h.id = m.hub_id
    where m.user_id = auth.uid()
    order by m.created_at
@@ -441,11 +474,14 @@ returns void language sql security definer set search_path = public as $$
 $$;
 
 -- Builds one week's rota on the hub's days, sharing trips round-robin. Keeps an existing week as it is.
+-- A single trip (a sports club group with a date) only has a rota in the week of that date: a lift there and a lift home.
 create or replace function public.build_rota(p_group uuid, p_week date)
 returns setof public.rota_slots language plpgsql security definer set search_path = public as $$
-declare members uuid[]; n int; d int; i int := 0; k text; wk date := date_trunc('week', p_week)::date; shift int; ds smallint[];
+declare members uuid[]; n int; d int; i int := 0; k text; wk date := date_trunc('week', p_week)::date; shift int; ds smallint[]; td date;
 begin
   if not in_group(p_group) then raise exception 'You''re not in this commute'; end if;
+  select h.trip_date into td from commute_groups g join hubs h on h.id = g.hub_id where g.id = p_group and h.kind = 'sport';
+  if td is not null and wk <> date_trunc('week', td)::date then return; end if;
   if not exists (select 1 from rota_slots where group_id = p_group and week_start = wk) then
     select array_agg(pid order by pid) into members from (
       select owner_id pid from commute_groups where id = p_group
@@ -453,7 +489,7 @@ begin
     n := array_length(members, 1);
     if n < 2 then raise exception 'Invite at least one family who accepts before building a rota'; end if;
     select array_agg(x order by x) into ds from (select distinct unnest(h.days) x from commute_groups g join hubs h on h.id = g.hub_id where g.id = p_group) y;
-    shift := ((wk - date '2024-01-01') / 7) % n; -- rotate who gets the extra trips each week
+    shift := case when td is null then ((wk - date '2024-01-01') / 7) % n else 0 end; -- rotate who gets the extra trips each week
     foreach d in array ds loop
       foreach k in array array['drop', 'pick'] loop
         -- Each day starts with the next family, so drop-offs and pick-ups both rotate.
@@ -489,7 +525,7 @@ begin
   if b.id is null or b.group_id <> a.group_id or b.parent_id = auth.uid() then raise exception 'Pick a slot another parent is doing'; end if;
   select * into me from profiles where id = auth.uid();
   insert into swap_requests (group_id, give_slot, take_slot, requester, responder) values (a.group_id, a.id, b.id, auth.uid(), b.parent_id);
-  perform notify(b.parent_id, 'swap', me.first_name || ' asked to swap: you’d take their ' || to_char(a.week_start + a.day, 'Dy DD Mon') || ' ' || case a.kind when 'drop' then 'drop-off' else 'pick-up' end || ' and they’d take your ' || to_char(b.week_start + b.day, 'Dy DD Mon') || ' ' || case b.kind when 'drop' then 'drop-off' else 'pick-up' end || '.');
+  perform notify(b.parent_id, 'swap', me.first_name || ' asked to swap: you’d take their ' || slot_word(a) || ' and they’d take your ' || slot_word(b) || '.');
 end $$;
 
 create or replace function public.respond_swap(p_swap uuid, p_accept boolean)
@@ -518,7 +554,7 @@ begin
   select * into s from rota_slots where id = p_slot;
   if s.id is null or not in_group(s.group_id) or s.confirmed then return; end if;
   select * into me from profiles where id = auth.uid();
-  perform notify(s.parent_id, 'rota', me.first_name || ' asked you to confirm your ' || to_char(s.week_start + s.day, 'Dy DD Mon') || ' ' || case s.kind when 'drop' then 'drop-off' else 'pick-up' end || '.');
+  perform notify(s.parent_id, 'rota', me.first_name || ' asked you to confirm your ' || slot_word(s) || '.');
 end $$;
 
 -- Names of the people in my commute groups, for the rota and chat.
@@ -684,8 +720,9 @@ begin
    order by u.created_at desc;
 end $$;
 
-create or replace function public.admin_hubs()
-returns table (id uuid, code text, kind text, name text, address text, created_at timestamptz, creator text, members bigint, admins bigint, commutes bigint, groups bigint)
+drop function if exists public.admin_hubs();
+create function public.admin_hubs()
+returns table (id uuid, code text, kind text, name text, address text, created_at timestamptz, creator text, members bigint, admins bigint, commutes bigint, groups bigint, trip_date date)
 language plpgsql stable security definer set search_path = public as $$
 begin
   if not is_platform_admin() then raise exception 'Only Scata admins can do that'; end if;
@@ -695,7 +732,7 @@ begin
          (select count(*) from hub_members m where m.hub_id = h.id),
          (select count(*) from hub_members m where m.hub_id = h.id and m.role = 'admin'),
          (select count(*) from public.commutes c where c.hub_id = h.id and c.accepted_terms),
-         (select count(*) from commute_groups g where g.hub_id = h.id)
+         (select count(*) from commute_groups g where g.hub_id = h.id), h.trip_date
     from public.hubs h
    order by h.created_at desc;
 end $$;
