@@ -19,6 +19,10 @@ Accounts and data live in Supabase (Postgres with row-level security, Auth and R
 
 Before launch: set up custom SMTP (Authentication → Emails) because Supabase's built-in mailer only sends a few emails an hour, and add real payments for Scata Plus (it is free during the pilot).
 
+## Demo data
+
+For demos, `supabase/demo-seed.sql` adds a made-up school (Greenfield National School), a sports club away match, and twelve families with rotas, chat, a swap request and a car on the live map. Run it in the SQL Editor after `schema.sql`; it rebuilds everything around today's date, so run it again on the morning of a demo. Every demo login (`demo.principal@example.com`, `demo.sean@example.com`, `demo.paul@example.com`, `demo.niamh@example.com`, `demo.ciara@example.com`, `demo.david@example.com`, `demo.coach@example.com`) uses the password `ScataDemo2026`. `supabase/demo-drive.sql` moves Seán's car one step along the school run; `supabase/demo-remove.sql` takes all demo data out.
+
 ## Editing
 
 Edit `src/app.html` (or `src/demo.html` for the mock-up), then run `sh build.sh` to regenerate `index.html`.
