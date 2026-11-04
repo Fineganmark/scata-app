@@ -935,6 +935,8 @@ function InviteFamilies({ a }) {
   const [emails, setEmails] = useState('');
   const [err, setErr] = useState('');
   const [mailto, setMailto] = useState('');
+  const [note, setNote] = useState('');
+  const [sending, setSending] = useState(false);
   const copy = () => navigator.clipboard.writeText(link).then(() => a.say('Link copied'), () => { const el = document.getElementById('invite-link'); const r = document.createRange(); r.selectNodeContents(el); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); a.say('Link selected. Copy it from here.'); });
   const add = async (e) => {
     e.preventDefault();
@@ -944,8 +946,24 @@ function InviteFamilies({ a }) {
     if (bad.length) { setErr(`Check ${bad.join(', ')}: that isn’t an email address`); return; }
     await a.run(() => q(sb.from('hub_invites').upsert(list.map(email => ({ hub_id: a.hub.id, email: email.toLowerCase() })), { onConflict: 'hub_id,email', ignoreDuplicates: true })));
     const body = `Hello,\n\n${a.hub.name} is using Scata to help families share the ${k.run} safely.\n\nJoin here: ${link}\nThe group code is ${a.hub.code}.\n\nThanks,\n${a.profile.first_name} ${a.profile.last_name}`;
-    setMailto(`mailto:?bcc=${encodeURIComponent(list.join(','))}&subject=${encodeURIComponent('Join ' + a.hub.name + ' on Scata')}&body=${encodeURIComponent(body)}`);
-    setEmails(''); setErr(''); a.say(`${list.length} ${list.length > 1 ? 'people' : 'person'} added to your list`);
+    const fallback = `mailto:?bcc=${encodeURIComponent(list.join(','))}&subject=${encodeURIComponent('Join ' + a.hub.name + ' on Scata')}&body=${encodeURIComponent(body)}`;
+    setSending(true);
+    // Scata emails the invites itself (Supabase Edge Function "send-invites"). If that isn't set up or fails, fall back to the admin's own email app.
+    let res;
+    try {
+      const { data, error } = await sb.functions.invoke('send-invites', { body: { hub_id: a.hub.id, emails: list.map(x => x.toLowerCase()) } });
+      if (error) { let m = ''; try { m = (await error.context.json()).error; } catch (_) {} throw new Error(m || error.message); }
+      res = data;
+    } catch (ex) {
+      console.warn('send-invites failed', ex);
+      setSending(false); setMailto(fallback); setEmails(''); setErr('');
+      setNote(`We saved ${list.length > 1 ? 'these people' : 'this person'} to your invite list but couldn’t email them from Scata. Use the button below to send the invite from your own email.`);
+      return;
+    }
+    setSending(false); setMailto(''); setEmails(''); setErr('');
+    const n = (res.sent || []).length, skip = (res.skipped || []).length;
+    setNote(n ? `Invite emailed to ${n} ${n > 1 ? 'people' : 'person'}.${skip ? ` ${skip} already got one a few minutes ago.` : ''} They’ll show as Invited until they join.` : 'They already got an invite a few minutes ago.');
+    a.say(n ? `Invite emailed to ${n} ${n > 1 ? 'people' : 'person'}` : 'Invite already sent');
   };
   return html`<main class="screen">
     <div class="hello"><h1>Invite ${k.people}</h1><p>${a.hub.name}</p></div>
@@ -956,8 +974,10 @@ function InviteFamilies({ a }) {
     </div>
     <form class="card" onSubmit=${add}>
       <h3>Invite by email</h3>
-      <${Field} id="inv-emails" label="Email addresses" value=${emails} onInput=${v => { setEmails(v); setErr(''); }} hint="Separate several addresses with commas" err=${err} />
-      <button class="btn" type="submit" disabled=${a.busy}>Add to my invite list</button>
+      <p class="muted" style="margin:0">We’ll email each person an invite with your link and group code.</p>
+      <${Field} id="inv-emails" label="Email addresses" value=${emails} onInput=${v => { setEmails(v); setErr(''); setNote(''); }} hint="Separate several addresses with commas" err=${err} />
+      <button class="btn" type="submit" disabled=${a.busy || sending}>${sending ? 'Sending…' : 'Send invites'}</button>
+      ${note ? html`<p class="small" role="status" style="margin:0">${note}</p>` : ''}
       ${mailto ? html`<a class="maplink" href=${mailto}>${I.mail}Open my email with the invite written</a><p class="demo-note" style="margin:0">This opens your own email app with everyone in BCC. Check it and press send.</p>` : ''}
     </form>
     <${Action} onClick=${() => a.go('hubProfile')}>See who has joined<//>

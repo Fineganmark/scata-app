@@ -77,6 +77,8 @@ create table if not exists public.hub_invites (
   created_at timestamptz not null default now(),
   unique (hub_id, email)
 );
+-- When the invite email last went out (set by the send-invites Edge Function).
+alter table public.hub_invites add column if not exists sent_at timestamptz;
 
 -- A commute group belongs to the parent who started it; others join by invitation. One per parent per hub.
 create table if not exists public.commute_groups (
