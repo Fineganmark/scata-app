@@ -20,8 +20,8 @@ Accounts and data live in Supabase (Postgres with row-level security, Auth and R
 
 Before launch: set up custom SMTP (Authentication → Emails) because Supabase's built-in mailer only sends a few emails an hour, and add real payments for Scata Plus (it is free during the pilot).
 
-`terms.html` is the draft terms of use, safety and privacy page that the app links to. Have it reviewed before a wider launch.
-
 ## Editing
 
 Edit `src/app.html` (or `src/demo.html` for the mock-up), then run `sh build.sh` to regenerate `index.html`.
+
+`terms.html` is the draft terms of use, safety and privacy page that the app links to. Have it reviewed before a wider launch.
