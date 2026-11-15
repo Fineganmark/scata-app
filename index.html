@@ -359,6 +359,10 @@ function Select({ id, label, value, onInput, options, hint }) {
     ${hint ? html`<span class="hint">${hint}</span>` : ''}
   </div>`;
 }
+// An Eircode typed any way (spaces anywhere, lower case) as "D12 TR83", or null if it isn't one.
+const eircode = (v) => { const x = String(v || '').replace(/[\s\u00a0-]+/g, '').toUpperCase(); return /^[A-Z]\d[\dW][A-Z0-9]{4}$/.test(x) ? x.slice(0, 3) + ' ' + x.slice(3) : null; };
+// An address as saved: a tidied Eircode, or the address as typed.
+const tidyPlace = (v) => eircode(v) || String(v || '').trim().replace(/\s+/g, ' ');
 // One time of day, "HH:MM". Older groups stored a window like "08:30-09:30": use its first time.
 const hhmm = (v) => { const m = /(\d{1,2})[:.](\d{2})/.exec(v || ''); return m ? m[1].padStart(2, '0') + ':' + m[2] : ''; };
 const TIMES = Array.from({ length: 15 * 12 + 1 }, (_, i) => { const t = 6 * 60 + i * 5; return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'); });
@@ -882,7 +886,7 @@ function NewHub({ a }) {
   const [tried, setTried] = useState(false);
   const set = (key) => (v) => setF({ ...f, [key]: v });
   const pickKind = (kd) => { setKind(kd); const n = KINDS[kd]; setF({ ...f, open: n.open, close: n.close, days: n.days, commute: n.commute }); };
-  const eirOk = /^[A-Za-z]\d[\dWw]\s?[A-Za-z0-9]{4}$/.test(f.address.trim());
+  const eirOk = !!eircode(f.address);
   const addrOk = kind === 'school' ? eirOk : f.address.trim().length >= 3;
   const single = kind === 'sport';
   const dateOk = !!f.trip_date && f.trip_date >= isoDate(new Date());
@@ -890,7 +894,7 @@ function NewHub({ a }) {
   const toggleDay = (i) => setF({ ...f, days: f.days.includes(i) ? f.days.filter(x => x !== i) : [...f.days, i].sort() });
   const submit = async (e) => {
     e.preventDefault(); setTried(true); if (!ok || a.busy) return;
-    const address = eirOk ? f.address.toUpperCase().trim().replace(/^(\w{3})\s?(\w{4})$/, '$1 $2') : f.address.trim();
+    const address = tidyPlace(f.address);
     const pos = await geocode(`${f.name}, ${address}, Ireland`) || await geocode(`${address}, Ireland`);
     const hub = await a.run(() => rpc('create_hub', { p_kind: kind, p_name: f.name, p_address: address, p_size: kind === 'school' ? f.size : null, p_open: f.open, p_close: f.close, p_days: f.days, p_lat: pos && pos.lat, p_lng: pos && pos.lng, p_commute: f.commute && kind !== 'school', p_trip_date: single ? f.trip_date : null }), `${f.name} is set up`);
     saveHub(hub.id); await a.reload({ hub: hub.id }); a.go(f.commute && kind !== 'school' ? 'setup' : 'hubOverview');
@@ -1054,12 +1058,13 @@ function HubEdit({ a, done }) {
   const [f, setF] = useState({ name: h.name, address: h.address, size: h.size || '100-200', open: hhmm(h.open_time), close: hhmm(h.close_time), days: [...h.days], trip_date: h.trip_date || nextSaturday() });
   const [tried, setTried] = useState(false);
   const set = (key) => (v) => setF({ ...f, [key]: v });
-  const ok = f.name.trim() && f.address.trim().length >= 3 && (single ? !!f.trip_date : f.days.length);
+  const addrOk = h.kind === 'school' ? !!eircode(f.address) : f.address.trim().length >= 3;
+  const ok = f.name.trim() && addrOk && (single ? !!f.trip_date : f.days.length);
   const toggleDay = (i) => setF({ ...f, days: f.days.includes(i) ? f.days.filter(x => x !== i) : [...f.days, i].sort() });
   const save = async (e) => {
     e.preventDefault(); setTried(true); if (!ok || a.busy) return;
     if (single && f.trip_date !== h.trip_date && h.trip_date && !confirm('Move the trip to the new date? The current lift rota will be cleared and a new one made for that day.')) return;
-    const patch = { name: f.name.trim(), address: f.address.trim(), open_time: f.open, close_time: f.close, ...(single ? { trip_date: f.trip_date } : { days: f.days }), ...(h.kind === 'school' ? { size: f.size } : {}) };
+    const patch = { name: f.name.trim(), address: tidyPlace(f.address), open_time: f.open, close_time: f.close, ...(single ? { trip_date: f.trip_date } : { days: f.days }), ...(h.kind === 'school' ? { size: f.size } : {}) };
     if (patch.address !== h.address) { const pos = await geocode(`${patch.name}, ${patch.address}, Ireland`) || await geocode(`${patch.address}, Ireland`); if (pos) { patch.lat = pos.lat; patch.lng = pos.lng; } }
     await a.run(() => q(sb.from('hubs').update(patch).eq('id', h.id)), 'Group details saved');
     await a.reload(); done();
@@ -1067,7 +1072,7 @@ function HubEdit({ a, done }) {
   return html`<form class="card form" onSubmit=${save}>
     <h3>Edit details</h3>
     <${Field} id="he-name" label="Name" value=${f.name} onInput=${set('name')} err=${tried && !f.name.trim() && 'Enter a name'} />
-    <${Field} id="he-addr" label=${k.address} value=${f.address} onInput=${set('address')} err=${tried && f.address.trim().length < 3 && 'Enter where the group meets'} />
+    <${Field} id="he-addr" label=${k.address} value=${f.address} onInput=${set('address')} err=${tried && !addrOk && (h.kind === 'school' ? 'Enter a 7-character Eircode, e.g. D12 TR83' : 'Enter where the group meets')} />
     ${h.kind === 'school' ? html`<${Select} id="he-size" label="Number of students" value=${f.size} onInput=${set('size')} options=${['0-100', '100-200', '200-400', '400-800', '800+']} />` : ''}
     ${single ? html`<${Field} id="he-date" label="Date of the trip" type="date" value=${f.trip_date} onInput=${set('trip_date')} hint="Change it to reuse this group for the next match or event" err=${tried && !f.trip_date && 'Pick a date'} />` : html`<div class="stack" style="gap:8px"><span>Which days do families travel?</span>
       <div class="days">${DAYS.map((dn, i) => html`<button type="button" class=${f.days.includes(i) ? 'on' : ''} aria-pressed=${f.days.includes(i)} aria-label=${dn} onClick=${() => toggleDay(i)}>${dn.slice(0, 2)}</button>`)}</div>
@@ -1274,11 +1279,12 @@ function Setup({ a }) {
     setTried(true);
     if (!c.home || (needKid && (!kid.name.trim() || !kid.dob))) return;
     if (needKid) await a.run(() => q(sb.from('children').insert({ parent_id: a.uid, name: kid.name.trim(), dob: kid.dob })));
-    const changedHome = c.home !== a.commute.home || a.commute.lat == null;
-    const pos = changedHome && c.home ? await geocode(c.home + ', Ireland') : null;
-    const patch = { home: c.home, mode: c.mode, seats: c.seats, drop_time: c.drop_time, pick_time: c.pick_time, updated_at: new Date().toISOString(), ...(pos ? { lat: pos.lat, lng: pos.lng } : {}) };
+    const home = tidyPlace(c.home);
+    const changedHome = home !== a.commute.home || a.commute.lat == null;
+    const pos = changedHome && home ? await geocode(home + ', Ireland') : null;
+    const patch = { home, mode: c.mode, seats: c.seats, drop_time: c.drop_time, pick_time: c.pick_time, updated_at: new Date().toISOString(), ...(pos ? { lat: pos.lat, lng: pos.lng } : {}) };
     await a.run(() => a.updateCommute(patch));
-    if (changedHome && c.home && !pos) a.say('We couldn’t find that address on the map. Try adding the Eircode.');
+    if (changedHome && home && !pos) a.say('We couldn’t find that address on the map. Try adding the Eircode.');
     await a.reload(); a.go('match');
   };
   return html`<main class="screen">
