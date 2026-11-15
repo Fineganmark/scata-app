@@ -15,10 +15,13 @@ Accounts and data live in Supabase (Postgres with row-level security, Auth and R
 3. Make yourself a Scata admin (opens the **Scata admin** panel in the menu: every account and group, Plus on/off, delete test accounts and groups). In the SQL Editor run, with the email you sign in with:
    `update public.profiles set is_admin = true where id = (select id from auth.users where email = 'you@example.com');`
    Sign in to the app and add your name first, so your profile exists.
-4. Never put the `service_role` key or the database password in this repo; only the anon key belongs in `config.js`.
+4. Optional, for the morning reminders about rota slots nobody has confirmed: Database → Extensions → turn on `pg_cron`, then run `supabase/schema.sql` again. Without it, the reminders still go out whenever someone in the commute opens the rota.
+5. Never put the `service_role` key or the database password in this repo; only the anon key belongs in `config.js`.
 
 Before launch: set up custom SMTP (Authentication → Emails) because Supabase's built-in mailer only sends a few emails an hour, and add real payments for Scata Plus (it is free during the pilot).
 
 ## Editing
 
 Edit `src/app.html` (or `src/demo.html` for the mock-up), then run `sh build.sh` to regenerate `index.html`.
+
+`terms.html` is the draft terms of use, safety and privacy page that the app links to. Have it reviewed before a wider launch.

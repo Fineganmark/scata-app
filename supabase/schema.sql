@@ -143,6 +143,11 @@ create table if not exists public.notifications (
   created_at timestamptz not null default now()
 );
 
+-- A notification about one rota slot links to it, so it can be confirmed from the notification.
+alter table public.notifications add column if not exists slot_id uuid references public.rota_slots on delete set null;
+-- Set once the families have been warned that a slot coming up isn't confirmed.
+alter table public.rota_slots add column if not exists reminded boolean not null default false;
+
 create index if not exists notifications_user on public.notifications (user_id, created_at desc);
 create index if not exists messages_group on public.messages (group_id, created_at);
 create index if not exists hub_members_user on public.hub_members (user_id);
@@ -199,6 +204,22 @@ language sql security definer set search_path = public as $$
   insert into notifications (user_id, kind, body) values (target, k, msg)
 $$;
 revoke execute on function public.notify(uuid, text, text) from public, anon, authenticated;
+
+create or replace function public.notify_slot(target uuid, k text, msg text, slot uuid) returns void
+language sql security definer set search_path = public as $$
+  insert into notifications (user_id, kind, body, slot_id) values (target, k, msg, slot)
+$$;
+revoke execute on function public.notify_slot(uuid, text, text, uuid) from public, anon, authenticated;
+
+-- Tell everyone else in a commute (the parent who started it and the families who accepted).
+create or replace function public.notify_group(g uuid, k text, msg text) returns void
+language sql security definer set search_path = public as $$
+  insert into notifications (user_id, kind, body)
+  select pid, k, msg from (select owner_id pid from commute_groups where id = g
+                           union select parent_id from group_members where group_id = g and status = 'accepted') x
+   where pid is distinct from auth.uid()
+$$;
+revoke execute on function public.notify_group(uuid, text, text) from public, anon, authenticated;
 
 -- How a hub's trip is described in messages.
 create or replace function public.trip_word(h uuid) returns text
@@ -392,7 +413,12 @@ begin
      and exists (select 1 from hub_members where hub_id = p_hub and user_id <> auth.uid()) then
     raise exception 'You''re the only admin. Other families still use this group, so it needs an admin.';
   end if;
-  delete from rota_slots s using commute_groups g where s.group_id = g.id and g.hub_id = p_hub and s.parent_id = auth.uid() and s.week_start >= date_trunc('week', now())::date;
+  -- Tell the families in the commutes this person was part of.
+  perform notify_group(g.id, 'rota', (select first_name || ' ' || last_name from profiles where id = auth.uid()) || ' has left ' || (select name from hubs where id = p_hub)
+           || case when g.owner_id = auth.uid() then '. The commute they started has closed.' else '. Their slots from today on are now free.' end)
+     from commute_groups g
+    where g.hub_id = p_hub and (g.owner_id = auth.uid() or exists (select 1 from group_members m where m.group_id = g.id and m.parent_id = auth.uid() and m.status = 'accepted'));
+  delete from rota_slots s using commute_groups g where s.group_id = g.id and g.hub_id = p_hub and s.parent_id = auth.uid() and s.week_start + s.day >= current_date;
   delete from group_members m using commute_groups g where m.group_id = g.id and g.hub_id = p_hub and m.parent_id = auth.uid();
   delete from commute_groups where hub_id = p_hub and owner_id = auth.uid();
   delete from commutes where hub_id = p_hub and parent_id = auth.uid();
@@ -467,11 +493,22 @@ begin
   perform notify(g.owner_id, 'invite', me.first_name || ' ' || case when p_accept then 'accepted' else 'declined' end || ' your invitation to share ' || trip_word(g.hub_id) || '.');
 end $$;
 
+-- Leaving a commute frees your slots from today on, and tells the others so the rota can be sorted out.
 create or replace function public.leave_group(p_group uuid)
-returns void language sql security definer set search_path = public as $$
+returns void language plpgsql security definer set search_path = public as $$
+declare me profiles; g commute_groups;
+begin
+  select * into me from profiles where id = auth.uid();
+  select * into g from commute_groups where id = p_group;
+  if not exists (select 1 from group_members where group_id = p_group and parent_id = auth.uid() and status = 'accepted') then
+    delete from group_members where group_id = p_group and parent_id = auth.uid();
+    return;
+  end if;
   delete from group_members where group_id = p_group and parent_id = auth.uid();
-  delete from rota_slots where group_id = p_group and parent_id = auth.uid() and week_start >= date_trunc('week', now())::date;
-$$;
+  delete from rota_slots where group_id = p_group and parent_id = auth.uid() and week_start + day >= current_date;
+  perform notify_group(p_group, 'rota', me.first_name || ' ' || me.last_name || ' has left your commute for ' || trip_word(g.hub_id)
+    || '. Their slots from today on are now free, so ' || (select first_name from profiles where id = g.owner_id) || ' can reset the rota.');
+end $$;
 
 -- Builds one week's rota on the hub's days, sharing trips round-robin. Keeps an existing week as it is.
 -- A single trip (a sports club group with a date) only has a rota in the week of that date: a lift there and a lift home.
@@ -505,14 +542,17 @@ end $$;
 create or replace function public.rebuild_rota(p_group uuid, p_week date)
 returns setof public.rota_slots language plpgsql security definer set search_path = public as $$
 begin
-  if not exists (select 1 from commute_groups where id = p_group and owner_id = auth.uid()) then raise exception 'Only the parent who started the commute can rebuild the rota'; end if;
+  if not exists (select 1 from commute_groups where id = p_group and owner_id = auth.uid()) then raise exception 'Only the parent who started the commute can reset the rota'; end if;
+  if date_trunc('week', p_week)::date + 6 < current_date then raise exception 'That week has already happened'; end if;
   delete from rota_slots where group_id = p_group and week_start = date_trunc('week', p_week)::date;
+  perform notify_group(p_group, 'rota', (select first_name from profiles where id = auth.uid()) || ' reset the rota for the week of '
+    || to_char(date_trunc('week', p_week)::date, 'DD Mon') || '. Check your slots and confirm them again.');
   return query select * from build_rota(p_group, p_week);
 end $$;
 
 create or replace function public.confirm_slot(p_slot uuid)
 returns void language sql security definer set search_path = public as $$
-  update rota_slots set confirmed = true where id = p_slot and parent_id = auth.uid();
+  update rota_slots set confirmed = true where id = p_slot and parent_id = auth.uid() and week_start + day >= current_date;
 $$;
 
 create or replace function public.request_swap(p_give uuid, p_take uuid)
@@ -523,6 +563,7 @@ begin
   select * into b from rota_slots where id = p_take;
   if a.parent_id is distinct from auth.uid() then raise exception 'You can only swap your own slot'; end if;
   if b.id is null or b.group_id <> a.group_id or b.parent_id = auth.uid() then raise exception 'Pick a slot another parent is doing'; end if;
+  if a.week_start + a.day < current_date or b.week_start + b.day < current_date then raise exception 'That slot has already happened'; end if;
   select * into me from profiles where id = auth.uid();
   insert into swap_requests (group_id, give_slot, take_slot, requester, responder) values (a.group_id, a.id, b.id, auth.uid(), b.parent_id);
   perform notify(b.parent_id, 'swap', me.first_name || ' asked to swap: you’d take their ' || slot_word(a) || ' and they’d take your ' || slot_word(b) || '.');
@@ -534,6 +575,10 @@ declare r swap_requests; me profiles;
 begin
   select * into r from swap_requests where id = p_swap and responder = auth.uid() and status = 'pending';
   if r.id is null then raise exception 'That swap request is no longer open'; end if;
+  if p_accept and exists (select 1 from rota_slots where id in (r.give_slot, r.take_slot) and week_start + day < current_date) then
+    update swap_requests set status = 'declined' where id = r.id;
+    raise exception 'That slot has already happened';
+  end if;
   select * into me from profiles where id = auth.uid();
   if p_accept then
     if (select parent_id from rota_slots where id = r.give_slot) <> r.requester or (select parent_id from rota_slots where id = r.take_slot) <> r.responder then
@@ -552,9 +597,32 @@ returns void language plpgsql security definer set search_path = public as $$
 declare s rota_slots; me profiles;
 begin
   select * into s from rota_slots where id = p_slot;
-  if s.id is null or not in_group(s.group_id) or s.confirmed then return; end if;
+  if s.id is null or not in_group(s.group_id) or s.confirmed or s.week_start + s.day < current_date then return; end if;
   select * into me from profiles where id = auth.uid();
-  perform notify(s.parent_id, 'rota', me.first_name || ' asked you to confirm your ' || slot_word(s) || '.');
+  perform notify_slot(s.parent_id, 'confirm', me.first_name || ' asked you to confirm your ' || slot_word(s) || '.', s.id);
+end $$;
+
+-- Warns a commute, once, about each slot today or tomorrow that nobody has confirmed.
+-- Runs every morning if pg_cron is turned on (see the end of this file), and each time someone opens the rota.
+-- Called by a parent, it only looks at their own commutes.
+create or replace function public.remind_unconfirmed()
+returns int language plpgsql security definer set search_path = public as $$
+declare s rota_slots; n int := 0; who text;
+begin
+  for s in select r.* from rota_slots r where not r.confirmed and not r.reminded
+             and r.week_start + r.day between current_date and current_date + 1
+             and (auth.uid() is null or in_group(r.group_id)) loop
+    update rota_slots set reminded = true where id = s.id;
+    select first_name into who from profiles where id = s.parent_id;
+    perform notify_slot(s.parent_id, 'confirm', 'Please confirm your ' || slot_word(s) || '. It’s coming up soon and the other families are waiting to hear.', s.id);
+    insert into notifications (user_id, kind, body, slot_id)
+    select pid, 'rota', who || ' hasn’t confirmed the ' || slot_word(s) || ' yet.', s.id
+      from (select owner_id pid from commute_groups where id = s.group_id
+            union select parent_id from group_members where group_id = s.group_id and status = 'accepted') x
+     where pid <> s.parent_id;
+    n := n + 1;
+  end loop;
+  return n;
 end $$;
 
 -- Names of the people in my commute groups, for the rota and chat.
@@ -777,6 +845,16 @@ end $$;
 
 grant execute on all functions in schema public to authenticated;
 revoke execute on function public.notify(uuid, text, text) from authenticated;
+revoke execute on function public.notify_slot(uuid, text, text, uuid) from authenticated;
+revoke execute on function public.notify_group(uuid, text, text) from authenticated;
+
+-- Morning reminders about unconfirmed slots. Needs pg_cron: Supabase > Database > Extensions > pg_cron. Then run this file again.
+do $$
+begin
+  if exists (select 1 from pg_extension where extname = 'pg_cron') then
+    perform cron.schedule('scata-remind-unconfirmed', '0 7 * * *', 'select public.remind_unconfirmed()');
+  end if;
+end $$;
 
 -- ---------- live updates ----------
 do $$
