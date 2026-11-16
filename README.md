@@ -11,7 +11,7 @@ Accounts and data live in Supabase (Postgres with row-level security, Auth and R
 ## Database setup (once per Supabase project)
 
 1. Supabase dashboard → SQL Editor → New query → paste all of `supabase/schema.sql` → Run. It is safe to run again after changes.
-2. Authentication → URL Configuration: Site URL `https://fineganmark.github.io/scata-app/`, and add the same address under Redirect URLs.
+2. Authentication → URL Configuration: Site URL `https://fineganmark.github.io/scata-app/`, and add the same address followed by `**` under Redirect URLs (for example `https://fineganmark.github.io/scata-app/**`), so the sign-up email can bring people back with their group code.
 3. Make yourself a Scata admin (opens the **Scata admin** panel in the menu: every account and group, Plus on/off, delete test accounts and groups). In the SQL Editor run, with the email you sign in with:
    `update public.profiles set is_admin = true where id = (select id from auth.users where email = 'you@example.com');`
    Sign in to the app and add your name first, so your profile exists.

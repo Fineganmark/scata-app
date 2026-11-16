@@ -564,8 +564,10 @@ const KINDS = {
 const kindOf = (h) => KINDS[(h && h.kind) || 'school'] || KINDS.school;
 // Shape the map helpers expect.
 const mapState = (a) => ({ school: a.hub ? { name: a.hub.name, eircode: a.hub.address } : { name: '', eircode: '' }, commute: { home: (a.commute && a.commute.home) || '', mode: (a.commute && a.commute.mode) || 'car' } });
-const initialCode = (() => { try { const u = new URLSearchParams(location.search); const c = u.get('join') || u.get('school'); if (c) sessionStorage.setItem('scata-code', c); return c || sessionStorage.getItem('scata-code') || ''; } catch (e) { return ''; } })();
-const clearCode = () => { try { sessionStorage.removeItem('scata-code'); } catch (e) {} };
+// A join code from an invite link. Kept in localStorage too, because the sign-up confirmation email
+// often opens the app in a new tab or another browser window, where sessionStorage is empty.
+const initialCode = (() => { try { const u = new URLSearchParams(location.search); const c = u.get('join') || u.get('school'); if (c) { sessionStorage.setItem('scata-code', c); localStorage.setItem('scata-code', c); } return c || sessionStorage.getItem('scata-code') || localStorage.getItem('scata-code') || ''; } catch (e) { return ''; } })();
+const clearCode = () => { try { sessionStorage.removeItem('scata-code'); localStorage.removeItem('scata-code'); } catch (e) {} };
 const HUB_KEY = 'scata-hub';
 const savedHub = () => { try { return localStorage.getItem(HUB_KEY); } catch (e) { return null; } };
 const saveHub = (id) => { try { localStorage.setItem(HUB_KEY, id); } catch (e) {} };
@@ -751,7 +753,7 @@ function Register({ a }) {
   const ok = !errs.email && !errs.pw && !errs.pw2;
   const submit = async (e) => {
     e.preventDefault(); setTried(true); setErr(''); if (!ok) return;
-    const { data, error } = await sb.auth.signUp({ email: f.email.trim(), password: f.pw, options: { emailRedirectTo: SITE } });
+    const { data, error } = await sb.auth.signUp({ email: f.email.trim(), password: f.pw, options: { emailRedirectTo: initialCode ? `${SITE}?join=${encodeURIComponent(initialCode)}` : SITE } });
     if (error) { setErr(/registered/i.test(error.message) ? 'An account already uses this email. Sign in instead.' : error.message); return; }
     if (!data.session) a.go('checkEmail');
   };
@@ -832,6 +834,8 @@ function NameInfo({ a }) {
 
 function Start({ a }) {
   const [pick, setPick] = useState(initialCode ? 'join' : '');
+  // Came from an invite link: skip the choice and go straight to joining, with the code filled in.
+  useEffect(() => { if (!initialCode) return; if ((a.hubs || []).some(h => h.code === initialCode)) clearCode(); else a.go('joinHub'); }, []);
   const first = !(a.hubs || []).length;
   return html`<main class="screen" style="padding-top:20px">
     ${first ? html`<div class="logo-wrap"><${Logo} size="lg" /></div>` : ''}
@@ -938,7 +942,7 @@ function HubOverview({ a }) {
       <div>${I.co2}<span class="big" style="font-size:18px">${fmt(fp.co2)} kg</span><span class="lbl">of carbon</span></div>
       <div>${I.jam}<span class="big" style="font-size:18px">Gate</span><span class="lbl">congestion</span></div>
     </div></div>` : html`<div class="card note"><p style="margin:0">Share the group code <b>${h.code}</b> or your invite link. Families who join can find each other nearby and share the ${k.run}.</p></div>`}
-    ${!a.commuting ? html`<div class="card flat" style="gap:10px"><span><b>${h.kind === 'school' ? 'Do you have children at this school too?' : 'Is your own family travelling too?'}</b> This is optional. You can also share the ${k.run} with other ${k.people}, as a parent, from this same account.</span><div><button class="btn sm ghost" disabled=${a.busy} onClick=${async () => { await a.run(() => rpc('join_hub', { p_code: h.code }), 'Now set up your own family’s trips'); await a.reload(); a.go('setup'); }}>Set up my own family’s trips</button></div></div>` : ''}
+    ${!a.commuting && h.kind !== 'school' ? html`<div class="card flat" style="gap:10px"><span><b>Is your own family travelling too?</b> This is optional. You can also share the ${k.run} with other ${k.people}, as a parent, from this same account.</span><div><button class="btn sm ghost" disabled=${a.busy} onClick=${async () => { await a.run(() => rpc('join_hub', { p_code: h.code }), 'Now set up your own family’s trips'); await a.reload(); a.go('setup'); }}>Set up my own family’s trips</button></div></div>` : ''}
     <${Action} onClick=${() => a.go('invite')}>Invite ${k.people}<//>
   </main>`;
 }
