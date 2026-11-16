@@ -345,6 +345,10 @@ function Select({ id, label, value, onInput, options, hint }) {
     ${hint ? html`<span class="hint">${hint}</span>` : ''}
   </div>`;
 }
+// An Eircode typed any way (spaces anywhere, lower case) as "D12 TR83", or null if it isn't one.
+const eircode = (v) => { const x = String(v || '').replace(/[\s\u00a0-]+/g, '').toUpperCase(); return /^[A-Z]\d[\dW][A-Z0-9]{4}$/.test(x) ? x.slice(0, 3) + ' ' + x.slice(3) : null; };
+// An address as saved: a tidied Eircode, or the address as typed.
+const tidyPlace = (v) => eircode(v) || String(v || '').trim().replace(/\s+/g, ' ');
 // One time of day, "HH:MM". Older groups stored a window like "08:30-09:30": use its first time.
 const hhmm = (v) => { const m = /(\d{1,2})[:.](\d{2})/.exec(v || ''); return m ? m[1].padStart(2, '0') + ':' + m[2] : ''; };
 const TIMES = Array.from({ length: 15 * 12 + 1 }, (_, i) => { const t = 6 * 60 + i * 5; return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'); });
@@ -537,10 +541,12 @@ const perTrips = (h) => isTrip(h) ? 'this trip' : 'a year';
 const estimateNote = (h) => isTrip(h) ? 'Estimate: 10 km round trip, there and back once.' : `Estimate: 10 km round trip, ${h.days.length} day${h.days.length > 1 ? 's' : ''} a week over a school year.`;
 const legName = (h, k) => kindOf(h).legs[k];
 const slotLabel = (slot, h) => isTrip(h) ? legName(h, slot.kind) : `${DAYS[slot.day]} ${legName(h, slot.kind)}`;
-// When a slot happens: its week's Monday + day, at the start of the commute's drop-off or pick-up window.
-function slotTime(slot, commute) {
+// The group's times, set by whoever runs it: when children arrive (drop) and leave (pick).
+const legTime = (h, k) => hhmm(k === 'drop' ? h.open_time : h.close_time);
+// When a slot happens: its week's Monday + day, at the group's arrival or leaving time.
+function slotTime(slot, h) {
   const d = new Date(slot.week_start + 'T00:00:00'); d.setDate(d.getDate() + slot.day);
-  const m = /(\d{1,2})[:.](\d{2})/.exec(slot.kind === 'drop' ? commute.drop_time : commute.pick_time);
+  const m = /(\d{1,2})[:.](\d{2})/.exec(legTime(h, slot.kind));
   d.setHours(m ? +m[1] : 9, m ? +m[2] : 0, 0, 0); return d;
 }
 async function geocode(address) {
@@ -868,7 +874,7 @@ function NewHub({ a }) {
   const [tried, setTried] = useState(false);
   const set = (key) => (v) => setF({ ...f, [key]: v });
   const pickKind = (kd) => { setKind(kd); const n = KINDS[kd]; setF({ ...f, open: n.open, close: n.close, days: n.days, commute: n.commute }); };
-  const eirOk = /^[A-Za-z]\d[\dWw]\s?[A-Za-z0-9]{4}$/.test(f.address.trim());
+  const eirOk = !!eircode(f.address);
   const addrOk = kind === 'school' ? eirOk : f.address.trim().length >= 3;
   const single = kind === 'sport';
   const dateOk = !!f.trip_date && f.trip_date >= isoDate(new Date());
@@ -876,7 +882,7 @@ function NewHub({ a }) {
   const toggleDay = (i) => setF({ ...f, days: f.days.includes(i) ? f.days.filter(x => x !== i) : [...f.days, i].sort() });
   const submit = async (e) => {
     e.preventDefault(); setTried(true); if (!ok || a.busy) return;
-    const address = eirOk ? f.address.toUpperCase().trim().replace(/^(\w{3})\s?(\w{4})$/, '$1 $2') : f.address.trim();
+    const address = tidyPlace(f.address);
     const pos = await geocode(`${f.name}, ${address}, Ireland`) || await geocode(`${address}, Ireland`);
     const hub = await a.run(() => rpc('create_hub', { p_kind: kind, p_name: f.name, p_address: address, p_size: kind === 'school' ? f.size : null, p_open: f.open, p_close: f.close, p_days: f.days, p_lat: pos && pos.lat, p_lng: pos && pos.lng, p_commute: f.commute && kind !== 'school', p_trip_date: single ? f.trip_date : null }), `${f.name} is set up`);
     saveHub(hub.id); await a.reload({ hub: hub.id }); a.go(f.commute && kind !== 'school' ? 'setup' : 'hubOverview');
@@ -900,7 +906,7 @@ function NewHub({ a }) {
         <${TimeSelect} id="hb-open" label=${k.start} value=${f.open} onInput=${set('open')} />
         <${TimeSelect} id="hb-close" label=${k.end} value=${f.close} onInput=${set('close')} />
       </div>
-      <p class="small muted" style="margin:0">${k.timeHint} Each family can change their own times later.</p>
+      <p class="small muted" style="margin:0">${k.timeHint} Everyone in the group uses these times.</p>
       ${kind === 'school' ? '' : html`<label class="check" for="hb-commute"><input id="hb-commute" type="checkbox" checked=${f.commute} onChange=${e => setF({ ...f, commute: e.target.checked })} />I’ll be sharing ${k.run} here with my own children too</label>`}
       <p class="small muted" style="margin:0">You’ll manage this group: invite ${k.people} and see who has joined.</p>
     </form>
@@ -1040,12 +1046,13 @@ function HubEdit({ a, done }) {
   const [f, setF] = useState({ name: h.name, address: h.address, size: h.size || '100-200', open: hhmm(h.open_time), close: hhmm(h.close_time), days: [...h.days], trip_date: h.trip_date || nextSaturday() });
   const [tried, setTried] = useState(false);
   const set = (key) => (v) => setF({ ...f, [key]: v });
-  const ok = f.name.trim() && f.address.trim().length >= 3 && (single ? !!f.trip_date : f.days.length);
+  const addrOk = h.kind === 'school' ? !!eircode(f.address) : f.address.trim().length >= 3;
+  const ok = f.name.trim() && addrOk && (single ? !!f.trip_date : f.days.length);
   const toggleDay = (i) => setF({ ...f, days: f.days.includes(i) ? f.days.filter(x => x !== i) : [...f.days, i].sort() });
   const save = async (e) => {
     e.preventDefault(); setTried(true); if (!ok || a.busy) return;
     if (single && f.trip_date !== h.trip_date && h.trip_date && !confirm('Move the trip to the new date? The current lift rota will be cleared and a new one made for that day.')) return;
-    const patch = { name: f.name.trim(), address: f.address.trim(), open_time: f.open, close_time: f.close, ...(single ? { trip_date: f.trip_date } : { days: f.days }), ...(h.kind === 'school' ? { size: f.size } : {}) };
+    const patch = { name: f.name.trim(), address: tidyPlace(f.address), open_time: f.open, close_time: f.close, ...(single ? { trip_date: f.trip_date } : { days: f.days }), ...(h.kind === 'school' ? { size: f.size } : {}) };
     if (patch.address !== h.address) { const pos = await geocode(`${patch.name}, ${patch.address}, Ireland`) || await geocode(`${patch.address}, Ireland`); if (pos) { patch.lat = pos.lat; patch.lng = pos.lng; } }
     await a.run(() => q(sb.from('hubs').update(patch).eq('id', h.id)), 'Group details saved');
     await a.reload(); done();
@@ -1053,14 +1060,14 @@ function HubEdit({ a, done }) {
   return html`<form class="card form" onSubmit=${save}>
     <h3>Edit details</h3>
     <${Field} id="he-name" label="Name" value=${f.name} onInput=${set('name')} err=${tried && !f.name.trim() && 'Enter a name'} />
-    <${Field} id="he-addr" label=${k.address} value=${f.address} onInput=${set('address')} err=${tried && f.address.trim().length < 3 && 'Enter where the group meets'} />
+    <${Field} id="he-addr" label=${k.address} value=${f.address} onInput=${set('address')} err=${tried && !addrOk && (h.kind === 'school' ? 'Enter a 7-character Eircode, e.g. D12 TR83' : 'Enter where the group meets')} />
     ${h.kind === 'school' ? html`<${Select} id="he-size" label="Number of students" value=${f.size} onInput=${set('size')} options=${['0-100', '100-200', '200-400', '400-800', '800+']} />` : ''}
     ${single ? html`<${Field} id="he-date" label="Date of the trip" type="date" value=${f.trip_date} onInput=${set('trip_date')} hint="Change it to reuse this group for the next match or event" err=${tried && !f.trip_date && 'Pick a date'} />` : html`<div class="stack" style="gap:8px"><span>Which days do families travel?</span>
       <div class="days">${DAYS.map((dn, i) => html`<button type="button" class=${f.days.includes(i) ? 'on' : ''} aria-pressed=${f.days.includes(i)} aria-label=${dn} onClick=${() => toggleDay(i)}>${dn.slice(0, 2)}</button>`)}</div>
       ${tried && !f.days.length ? html`<span class="err">Pick at least one day</span>` : ''}
     </div>`}
     <div class="grid2"><${TimeSelect} id="he-open" label=${k.start} value=${f.open} onInput=${set('open')} /><${TimeSelect} id="he-close" label=${k.end} value=${f.close} onInput=${set('close')} /></div>
-    <p class="small muted" style="margin:0">${k.timeHint} Families who already set their own times keep them.</p>
+    <p class="small muted" style="margin:0">${k.timeHint} Changing them changes them for everyone in the group.</p>
     <div class="row"><button class="btn sm" type="submit" disabled=${a.busy}>Save</button><button class="btn ghost sm" type="button" onClick=${done}>Cancel</button></div>
   </form>`;
 }
@@ -1251,7 +1258,7 @@ function AdminHubs({ a, hubs, reload }) {
 function Hello({ a }) { return html`<div class="hello"><h1>Hi, ${a.profile.first_name}!</h1><p>${a.hub ? a.hub.name : ''}</p></div>`; }
 
 function Setup({ a }) {
-  const [c, setC] = useState({ ...a.commute, drop_time: hhmm(a.commute.drop_time) || hhmm(a.hub.open_time), pick_time: hhmm(a.commute.pick_time) || hhmm(a.hub.close_time) });
+  const [c, setC] = useState({ ...a.commute });
   const [kid, setKid] = useState({ name: '', dob: '' });
   const [tried, setTried] = useState(false);
   const needKid = !(a.children || []).length;
@@ -1260,11 +1267,12 @@ function Setup({ a }) {
     setTried(true);
     if (!c.home || (needKid && (!kid.name.trim() || !kid.dob))) return;
     if (needKid) await a.run(() => q(sb.from('children').insert({ parent_id: a.uid, name: kid.name.trim(), dob: kid.dob })));
-    const changedHome = c.home !== a.commute.home || a.commute.lat == null;
-    const pos = changedHome && c.home ? await geocode(c.home + ', Ireland') : null;
-    const patch = { home: c.home, mode: c.mode, seats: c.seats, drop_time: c.drop_time, pick_time: c.pick_time, updated_at: new Date().toISOString(), ...(pos ? { lat: pos.lat, lng: pos.lng } : {}) };
+    const home = tidyPlace(c.home);
+    const changedHome = home !== a.commute.home || a.commute.lat == null;
+    const pos = changedHome && home ? await geocode(home + ', Ireland') : null;
+    const patch = { home, mode: c.mode, seats: c.seats, drop_time: legTime(a.hub, 'drop'), pick_time: legTime(a.hub, 'pick'), updated_at: new Date().toISOString(), ...(pos ? { lat: pos.lat, lng: pos.lng } : {}) };
     await a.run(() => a.updateCommute(patch));
-    if (changedHome && c.home && !pos) a.say('We couldn’t find that address on the map. Try adding the Eircode.');
+    if (changedHome && home && !pos) a.say('We couldn’t find that address on the map. Try adding the Eircode.');
     await a.reload(); a.go('match');
   };
   return html`<main class="screen">
@@ -1283,13 +1291,9 @@ function Setup({ a }) {
       <div class="stack"><span class="center">As well as your own, how many other children can you take?</span>
         <div class="choice">${[1, 2, 3, 4].map(k => html`<button class=${'seat' + (c.seats === k ? ' on' : '')} aria-pressed=${c.seats === k} aria-label=${k + (k === 1 ? ' other child' : ' other children')} onClick=${() => set('seats', k)}>${k}</button>`)}</div>
       </div>
-      <div class="stack" style="gap:18px"><span class="center">Where do you leave from, and what time do you need to be there?</span>
+      <div class="stack" style="gap:18px"><span class="center">Where do you leave from?</span>
         <${Field} id="su-home" label="Home Eircode or address" value=${c.home || ''} onInput=${v => set('home', v)} hint="Only used to find families near you. Other parents never see it." err=${tried && !c.home && 'Enter your Eircode or address'} />
-        <div class="grid2">
-          <${TimeSelect} id="su-drop" label=${a.kind.dropAt} value=${c.drop_time} onInput=${v => set('drop_time', v)} />
-          <${TimeSelect} id="su-pick" label=${a.kind.pickAt} value=${c.pick_time} onInput=${v => set('pick_time', v)} />
-        </div>
-        <span class="small muted">${a.kind.timeHint}</span>
+        <div class="card flat" style="gap:6px"><span>${a.kind.dropAt} <b>${legTime(a.hub, 'drop')}</b> · ${a.kind.pickAt.replace(/^./, x => x.toLowerCase())} <b>${legTime(a.hub, 'pick')}</b></span><span class="small muted">${a.hub.name} sets these times for everyone. ${a.kind.timeHint}</span></div>
       </div>
     </div>
     <div class="action"><button class="btn" disabled=${a.busy} onClick=${save}>${a.busy ? 'Saving…' : 'Let’s Go!'}</button></div>
@@ -1445,11 +1449,11 @@ function Calendar({ a }) {
   const members = people.filter(p => p.status === 'accepted').length;
   const per = members ? (single ? 2 : days.length * 2) / members : 0;
   const dayDate = (i) => { const x = new Date(mon); x.setDate(x.getDate() + i); return x; };
-  const times = { drop: hhmm(a.commute.drop_time), pick: hhmm(a.commute.pick_time) };
+  const times = { drop: legTime(a.hub, 'drop'), pick: legTime(a.hub, 'pick') };
   const past = single ? tripPast(a.hub) : offset < 0;
   // A slot that has already happened is locked: no confirming, swapping or nudging.
-  const gone = (slot) => past || slotTime(slot, a.commute) < new Date();
-  const soon = (slots || []).filter(x => !x.confirmed && !gone(x) && slotTime(x, a.commute) - new Date() < 864e5);
+  const gone = (slot) => past || slotTime(slot, a.hub) < new Date();
+  const soon = (slots || []).filter(x => !x.confirmed && !gone(x) && slotTime(x, a.hub) - new Date() < 864e5);
   const shownDays = [...new Set([...days, ...(slots || []).map(s => s.day)])].sort();
   const tapSlot = async (slot) => {
     if (!swapFrom || past) return;
@@ -1509,7 +1513,7 @@ function useNextTrip(a) {
       for (const off of isTrip(a.hub) ? [tripWeek(a.hub)] : [0, 1]) {
         let slots;
         try { slots = await rpc('build_rota', { p_group: a.gid, p_week: isoDate(mondayOf(off)) }); } catch (e) { setTrip(null); return; }
-        const next = slots.map(s => ({ ...s, at: slotTime(s, a.commute) })).filter(s => s.at.getTime() > soon).sort((x, y) => x.at - y.at)[0];
+        const next = slots.map(s => ({ ...s, at: slotTime(s, a.hub) })).filter(s => s.at.getTime() > soon).sort((x, y) => x.at - y.at)[0];
         if (next) { setTrip(next); return; }
       }
       setTrip(null);
@@ -1527,7 +1531,7 @@ function NextTrip({ a }) {
   if (!slot) return html`<main class="screen"><${Hello} a=${a} /><div class="card note"><h3>No trips yet</h3><p style="margin:0">Once a family joins your commute, your next trip shows here.</p></div><${Action} onClick=${() => a.go('manage')}>Build my commute<//></main>`;
   const mine = slot.parent_id === a.uid;
   const driver = mine ? 'You' : ((a.people[a.gid] || []).find(p => p.parent_id === slot.parent_id) || {}).first_name || 'A parent';
-  const t = hhmm(slot.kind === 'drop' ? a.commute.drop_time : a.commute.pick_time);
+  const t = legTime(a.hub, slot.kind);
   const at = slot.kind === 'drop' ? `at ${a.hub.name} by` : `from ${a.hub.name} at`;
   const daysAway = Math.round((new Date(slot.at).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / 864e5);
   const when = daysAway === 0 ? 'today' : daysAway === 1 ? 'tomorrow' : isTrip(a.hub) ? `on ${tripWhen(a.hub)}` : daysAway > 6 ? `next ${DAYS[slot.day]}` : DAYS[slot.day];
@@ -1709,7 +1713,7 @@ function Commutes({ a }) {
     <div><h2 class="title">Commutes</h2><div class="crumbs"><b>Dashboard</b>•<span>Commutes</span></div></div>
     <${GroupPicker} a=${a} />
     <div class="card">
-      <div class="row"><span class="mode on" style="width:48px;height:48px;cursor:default">${MODE_ICON[a.commute.mode]}</span><div class="grow"><b>${run} · ${a.hub.name}</b><div class="muted small">${MODE_NAME[a.commute.mode]}${isTrip(a.hub) ? ` · ${tripWhen(a.hub)}` : ''} · ${legName(a.hub, 'drop')} ${hhmm(a.commute.drop_time)} · ${legName(a.hub, 'pick')} ${hhmm(a.commute.pick_time)}</div></div></div>
+      <div class="row"><span class="mode on" style="width:48px;height:48px;cursor:default">${MODE_ICON[a.commute.mode]}</span><div class="grow"><b>${run} · ${a.hub.name}</b><div class="muted small">${MODE_NAME[a.commute.mode]}${isTrip(a.hub) ? ` · ${tripWhen(a.hub)}` : ''} · ${legName(a.hub, 'drop')} ${legTime(a.hub, 'drop')} · ${legName(a.hub, 'pick')} ${legTime(a.hub, 'pick')}</div></div></div>
       <div class="row between" style="display:flex"><span class="muted">Families sharing</span><b>${accepted.length + 1}</b></div>
       <div class="row" style="flex-wrap:wrap;gap:8px">${accepted.map(p => html`<span class="row" style="gap:6px;background:var(--surface);border-radius:20px;padding:4px 10px 4px 4px"><${Avatar} name=${p.first_name + ' ' + p.last_name} size="sm" /><span class="small">${p.first_name} ${p.last_name}</span></span>`)}</div>
       <div class="row" style="gap:8px"><button class="btn sm ghost" onClick=${() => a.go('calendar')}>Calendar</button><button class="btn sm ghost" onClick=${() => a.go('manage')}>Manage</button><button class="btn sm ghost" onClick=${() => a.go('setup')}>Edit</button></div>
