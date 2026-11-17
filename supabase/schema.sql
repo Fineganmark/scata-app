@@ -23,6 +23,9 @@ create table if not exists public.hubs (
 );
 -- A sports club group is one trip (a match, a blitz, a gala): the day it happens. Schools and other groups leave it empty and run every week.
 alter table public.hubs add column if not exists trip_date date;
+-- Who can join. 'approval': anyone with the code or link can ask, and an admin approves them (people the admin invited by email go straight in).
+-- 'invite': invite only. Only the emails the admin invited can join; the code or link does nothing for anyone else.
+alter table public.hubs add column if not exists join_policy text not null default 'approval' check (join_policy in ('approval', 'invite'));
 
 create table if not exists public.profiles (
   id uuid primary key references auth.users on delete cascade,
@@ -43,6 +46,9 @@ create table if not exists public.hub_members (
   created_at timestamptz not null default now(),
   primary key (hub_id, user_id)
 );
+-- Someone who joins with the code or link asks to join: they wait as 'pending' until an admin approves them.
+-- Everyone already in a group stays 'active'.
+alter table public.hub_members add column if not exists status text not null default 'active' check (status in ('active', 'pending'));
 
 create table if not exists public.children (
   id uuid primary key default gen_random_uuid(),
@@ -147,6 +153,8 @@ create table if not exists public.notifications (
 
 -- A notification about one rota slot links to it, so it can be confirmed from the notification.
 alter table public.notifications add column if not exists slot_id uuid references public.rota_slots on delete set null;
+-- A notification about a group (a request to join, an approval) links to it.
+alter table public.notifications add column if not exists hub_id uuid references public.hubs on delete cascade;
 -- Set once the families have been warned that a slot coming up isn't confirmed.
 alter table public.rota_slots add column if not exists reminded boolean not null default false;
 
@@ -159,7 +167,7 @@ create index if not exists commutes_hub on public.commutes (hub_id);
 
 create or replace function public.in_hub(h uuid) returns boolean
 language sql stable security definer set search_path = public as $$
-  select exists (select 1 from hub_members where hub_id = h and user_id = auth.uid())
+  select exists (select 1 from hub_members where hub_id = h and user_id = auth.uid() and status = 'active')
 $$;
 
 create or replace function public.is_hub_admin(h uuid) returns boolean
@@ -212,6 +220,19 @@ language sql security definer set search_path = public as $$
   insert into notifications (user_id, kind, body, slot_id) values (target, k, msg, slot)
 $$;
 revoke execute on function public.notify_slot(uuid, text, text, uuid) from public, anon, authenticated;
+
+create or replace function public.notify_hub(target uuid, k text, msg text, hub uuid) returns void
+language sql security definer set search_path = public as $$
+  insert into notifications (user_id, kind, body, hub_id) values (target, k, msg, hub)
+$$;
+revoke execute on function public.notify_hub(uuid, text, text, uuid) from public, anon, authenticated;
+
+-- True when the person signed in has a confirmed email that a group's admin invited.
+create or replace function public.invited_to(h uuid) returns boolean
+language sql stable security definer set search_path = public, auth as $$
+  select exists (select 1 from hub_invites i join auth.users u on lower(u.email) = lower(i.email)
+                  where i.hub_id = h and u.id = auth.uid() and u.email_confirmed_at is not null)
+$$;
 
 -- Tell everyone else in a commute (the parent who started it and the families who accepted).
 create or replace function public.notify_group(g uuid, k text, msg text) returns void
@@ -332,7 +353,7 @@ grant update (first_name, last_name, plus) on public.profiles to authenticated;
 revoke update on public.notifications from authenticated;
 grant update (read) on public.notifications to authenticated;
 revoke update on public.hubs from authenticated;
-grant update (name, address, size, open_time, close_time, days, lat, lng, trip_date) on public.hubs to authenticated;
+grant update (name, address, size, open_time, close_time, days, lat, lng, trip_date, join_policy) on public.hubs to authenticated;
 revoke insert, update, delete on public.hub_members, public.commute_groups, public.group_members, public.rota_slots, public.swap_requests from authenticated;
 revoke insert on public.hubs from authenticated;
 
@@ -377,33 +398,81 @@ begin
 end $$;
 
 -- Join a hub with its code. Also used by an admin of a hub to start sharing trips there themselves.
+-- Someone the admin invited by email goes straight in. Anyone else asks to join and waits for an admin to approve them,
+-- unless the group is invite only, when they're turned away.
 create or replace function public.join_hub(p_code text)
 returns public.hubs language plpgsql security definer set search_path = public as $$
-declare h hubs; me profiles; fresh boolean;
+declare h hubs; me profiles; m hub_members; who text;
 begin
   select * into me from profiles where id = auth.uid();
   if me.id is null then raise exception 'Please add your name first'; end if;
   select * into h from hubs where code = lower(trim(p_code));
   if h.id is null then raise exception 'That code doesn''t match a group. Check the code in your invite.'; end if;
-  insert into hub_members (hub_id, user_id) values (h.id, auth.uid()) on conflict do nothing;
-  fresh := found;
-  insert into commutes (parent_id, hub_id, drop_time, pick_time) values (auth.uid(), h.id, h.open_time, h.close_time) on conflict do nothing;
-  if fresh then
-    perform notify(m.user_id, 'school', me.first_name || ' ' || me.last_name || ' joined ' || h.name || ' on Scata.')
-       from hub_members m where m.hub_id = h.id and m.role = 'admin' and m.user_id <> auth.uid();
+  select * into m from hub_members where hub_id = h.id and user_id = auth.uid();
+  if m.status = 'active' then
+    insert into commutes (parent_id, hub_id, drop_time, pick_time) values (auth.uid(), h.id, h.open_time, h.close_time) on conflict do nothing;
+    return h;
+  end if;
+  if m.status = 'pending' then return h; end if;
+  who := me.first_name || ' ' || me.last_name;
+  if invited_to(h.id) then
+    insert into hub_members (hub_id, user_id, status) values (h.id, auth.uid(), 'active') on conflict do nothing;
+    insert into commutes (parent_id, hub_id, drop_time, pick_time) values (auth.uid(), h.id, h.open_time, h.close_time) on conflict do nothing;
+    perform notify_hub(a.user_id, 'school', who || ' joined ' || h.name || ' on Scata.', h.id)
+       from hub_members a where a.hub_id = h.id and a.role = 'admin' and a.user_id <> auth.uid();
+  elsif h.join_policy = 'invite' then
+    raise exception '% is invite only. Ask its admin to invite the email address you signed in with.', h.name;
+  else
+    insert into hub_members (hub_id, user_id, status) values (h.id, auth.uid(), 'pending') on conflict do nothing;
+    perform notify_hub(a.user_id, 'join', who || ' asked to join ' || h.name || '. Approve or decline them.', h.id)
+       from hub_members a where a.hub_id = h.id and a.role = 'admin' and a.user_id <> auth.uid();
   end if;
   return h;
+end $$;
+
+-- Groups I've asked to join and am waiting to be approved for.
+create or replace function public.my_join_requests()
+returns table (id uuid, name text, kind text, asked_at timestamptz)
+language sql stable security definer set search_path = public as $$
+  select h.id, h.name, h.kind, m.created_at from hub_members m join hubs h on h.id = m.hub_id
+   where m.user_id = auth.uid() and m.status = 'pending' order by m.created_at
+$$;
+
+-- An admin lets someone in. They start sharing trips there like anyone who joined.
+create or replace function public.approve_join(p_hub uuid, p_user uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare h hubs;
+begin
+  if not can_manage_hub(p_hub) then raise exception 'Only the group''s admins can do that'; end if;
+  update hub_members set status = 'active', created_at = now() where hub_id = p_hub and user_id = p_user and status = 'pending';
+  if not found then raise exception 'That request is no longer open'; end if;
+  select * into h from hubs where id = p_hub;
+  insert into commutes (parent_id, hub_id, drop_time, pick_time) values (p_user, h.id, h.open_time, h.close_time) on conflict do nothing;
+  perform notify_hub(p_user, 'joined', 'You’re in! ' || h.name || ' approved your request to join. Set up your family’s trips there.', h.id);
+end $$;
+
+-- An admin turns a request down. The person is told and can ask again later.
+create or replace function public.decline_join(p_hub uuid, p_user uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare h hubs;
+begin
+  if not can_manage_hub(p_hub) then raise exception 'Only the group''s admins can do that'; end if;
+  delete from hub_members where hub_id = p_hub and user_id = p_user and status = 'pending';
+  if not found then raise exception 'That request is no longer open'; end if;
+  select * into h from hubs where id = p_hub;
+  perform notify(p_user, 'school', 'Your request to join ' || h.name || ' wasn’t approved.');
 end $$;
 
 -- My hubs, with my role and whether I share trips there.
 drop function if exists public.my_hubs();
 create function public.my_hubs()
-returns table (id uuid, code text, kind text, name text, address text, size text, open_time text, close_time text, days smallint[], lat double precision, lng double precision, role text, commuting boolean, trip_date date)
+returns table (id uuid, code text, kind text, name text, address text, size text, open_time text, close_time text, days smallint[], lat double precision, lng double precision, role text, commuting boolean, trip_date date, join_policy text, requests bigint)
 language sql stable security definer set search_path = public as $$
   select h.id, h.code, h.kind, h.name, h.address, h.size, h.open_time, h.close_time, h.days, h.lat, h.lng, m.role,
-         exists (select 1 from commutes c where c.hub_id = h.id and c.parent_id = auth.uid()), h.trip_date
+         exists (select 1 from commutes c where c.hub_id = h.id and c.parent_id = auth.uid()), h.trip_date, h.join_policy,
+         case when m.role = 'admin' then (select count(*) from hub_members r where r.hub_id = h.id and r.status = 'pending') else 0 end
     from hub_members m join hubs h on h.id = m.hub_id
-   where m.user_id = auth.uid()
+   where m.user_id = auth.uid() and m.status = 'active'
    order by m.created_at
 $$;
 
@@ -412,7 +481,7 @@ create or replace function public.leave_hub(p_hub uuid)
 returns void language plpgsql security definer set search_path = public as $$
 begin
   if is_hub_admin(p_hub) and not exists (select 1 from hub_members where hub_id = p_hub and role = 'admin' and user_id <> auth.uid())
-     and exists (select 1 from hub_members where hub_id = p_hub and user_id <> auth.uid()) then
+     and exists (select 1 from hub_members where hub_id = p_hub and user_id <> auth.uid() and status = 'active') then
     raise exception 'You''re the only admin. Other families still use this group, so it needs an admin.';
   end if;
   -- Tell the families in the commutes this person was part of.
@@ -425,13 +494,13 @@ begin
   delete from commute_groups where hub_id = p_hub and owner_id = auth.uid();
   delete from commutes where hub_id = p_hub and parent_id = auth.uid();
   delete from hub_members where hub_id = p_hub and user_id = auth.uid();
-  delete from hubs where id = p_hub and not exists (select 1 from hub_members where hub_id = p_hub);
+  delete from hubs where id = p_hub and not exists (select 1 from hub_members where hub_id = p_hub and status = 'active');
 end $$;
 
 create or replace function public.hub_stats(p_hub uuid)
 returns table (members bigint, commutes bigint, walk bigint, bike bigint, car bigint, bus bigint, groups bigint)
 language sql stable security definer set search_path = public as $$
-  select (select count(*) from hub_members where hub_id = p_hub),
+  select (select count(*) from hub_members where hub_id = p_hub and status = 'active'),
          (select count(*) from commutes where hub_id = p_hub and accepted_terms),
          (select count(*) from commutes where hub_id = p_hub and accepted_terms and mode = 'walk'),
          (select count(*) from commutes where hub_id = p_hub and accepted_terms and mode = 'bike'),
@@ -660,7 +729,9 @@ drop function if exists public.hub_people(uuid);
 create function public.hub_people(p_hub uuid)
 returns table (user_id uuid, name text, email text, status text, role text, commuting boolean, joined_at timestamptz)
 language sql stable security definer set search_path = public as $$
-  select m.user_id, p.first_name || ' ' || p.last_name, u.email::text, case when m.role = 'admin' then 'admin' else 'active' end, m.role,
+  select * from (
+  select m.user_id, p.first_name || ' ' || p.last_name, u.email::text,
+         case when m.status = 'pending' then 'pending' when m.role = 'admin' then 'admin' else 'active' end, m.role,
          exists (select 1 from commutes c where c.hub_id = m.hub_id and c.parent_id = m.user_id), m.created_at
     from hub_members m join profiles p on p.id = m.user_id join auth.users u on u.id = m.user_id
    where m.hub_id = p_hub and can_manage_hub(p_hub)
@@ -669,7 +740,8 @@ language sql stable security definer set search_path = public as $$
     from hub_invites i
    where i.hub_id = p_hub and can_manage_hub(p_hub)
      and not exists (select 1 from auth.users u join hub_members m on m.user_id = u.id where lower(u.email) = lower(i.email) and m.hub_id = i.hub_id)
-  order by 7 desc
+  ) x(user_id, name, email, status, role, commuting, joined_at)
+  order by status = 'pending' desc, joined_at desc
 $$;
 
 -- The commute groups families have formed inside a group, for its admins.
@@ -695,6 +767,7 @@ begin
   if p_role = 'member' and not exists (select 1 from hub_members where hub_id = p_hub and role = 'admin' and user_id <> p_user) then
     raise exception 'Every group needs at least one admin. Make someone else an admin first.';
   end if;
+  if exists (select 1 from hub_members where hub_id = p_hub and user_id = p_user and status = 'pending') then raise exception 'Approve them first'; end if;
   update hub_members set role = p_role where hub_id = p_hub and user_id = p_user and role <> p_role;
   if not found then return; end if;
   select * into h from hubs where id = p_hub;
@@ -712,7 +785,7 @@ begin
   if p_user = auth.uid() then raise exception 'You can’t remove yourself here'; end if;
   if not exists (select 1 from hub_members where hub_id = p_hub and user_id = p_user) then raise exception 'That person isn''t in this group'; end if;
   if not exists (select 1 from hub_members where hub_id = p_hub and role = 'admin' and user_id <> p_user)
-     and exists (select 1 from hub_members where hub_id = p_hub and user_id <> p_user) then
+     and exists (select 1 from hub_members where hub_id = p_hub and user_id <> p_user and status = 'active') then
     raise exception 'They’re the only admin. Make someone else an admin first.';
   end if;
   select * into h from hubs where id = p_hub;
@@ -723,7 +796,7 @@ begin
   delete from hub_members where hub_id = p_hub and user_id = p_user;
   delete from hub_invites i using auth.users u where u.id = p_user and i.hub_id = p_hub and lower(i.email) = lower(u.email);
   perform notify(p_user, 'school', 'You were removed from ' || h.name || ' on Scata.');
-  delete from hubs where id = p_hub and not exists (select 1 from hub_members where hub_id = p_hub);
+  delete from hubs where id = p_hub and not exists (select 1 from hub_members where hub_id = p_hub and status = 'active');
 end $$;
 
 -- Closes a group for everyone. Its commute groups, rotas and chats go with it.
@@ -783,7 +856,7 @@ begin
   return query
   select u.id, u.email::text, case when p.id is null then null else p.first_name || ' ' || p.last_name end,
          coalesce(p.plus, false), coalesce(p.is_admin, false), u.email_confirmed_at is not null, u.created_at, u.last_sign_in_at,
-         coalesce((select string_agg(h.name || case when m.role = 'admin' then ' (admin)' else '' end, ', ' order by m.created_at)
+         coalesce((select string_agg(h.name || case when m.status = 'pending' then ' (asked to join)' when m.role = 'admin' then ' (admin)' else '' end, ', ' order by m.created_at)
                      from hub_members m join public.hubs h on h.id = m.hub_id where m.user_id = u.id), ''),
          (select count(*) from public.children c where c.parent_id = u.id)
     from auth.users u left join profiles p on p.id = u.id
@@ -792,17 +865,18 @@ end $$;
 
 drop function if exists public.admin_hubs();
 create function public.admin_hubs()
-returns table (id uuid, code text, kind text, name text, address text, created_at timestamptz, creator text, members bigint, admins bigint, commutes bigint, groups bigint, trip_date date)
+returns table (id uuid, code text, kind text, name text, address text, created_at timestamptz, creator text, members bigint, admins bigint, commutes bigint, groups bigint, trip_date date, join_policy text, requests bigint)
 language plpgsql stable security definer set search_path = public as $$
 begin
   if not is_platform_admin() then raise exception 'Only Scata admins can do that'; end if;
   return query
   select h.id, h.code, h.kind, h.name, h.address, h.created_at,
          (select p.first_name || ' ' || p.last_name from profiles p where p.id = h.created_by),
-         (select count(*) from hub_members m where m.hub_id = h.id),
+         (select count(*) from hub_members m where m.hub_id = h.id and m.status = 'active'),
          (select count(*) from hub_members m where m.hub_id = h.id and m.role = 'admin'),
          (select count(*) from public.commutes c where c.hub_id = h.id and c.accepted_terms),
-         (select count(*) from commute_groups g where g.hub_id = h.id), h.trip_date
+         (select count(*) from commute_groups g where g.hub_id = h.id), h.trip_date, h.join_policy,
+         (select count(*) from hub_members m where m.hub_id = h.id and m.status = 'pending')
     from public.hubs h
    order by h.created_at desc;
 end $$;
@@ -837,11 +911,11 @@ begin
   delete from auth.users where id = p_user;
   if orphaned is not null then
     update hub_members m set role = 'admin'
-      from (select distinct on (hub_id) hub_id, user_id from hub_members where hub_id = any(orphaned) order by hub_id, created_at) f
+      from (select distinct on (hub_id) hub_id, user_id from hub_members where hub_id = any(orphaned) and status = 'active' order by hub_id, created_at) f
      where m.hub_id = f.hub_id and m.user_id = f.user_id;
     perform notify(m.user_id, 'school', 'You’re now the admin of ' || h.name || ' on Scata.')
        from hub_members m join public.hubs h on h.id = m.hub_id where m.hub_id = any(orphaned) and m.role = 'admin';
-    delete from public.hubs h where h.id = any(orphaned) and not exists (select 1 from hub_members m where m.hub_id = h.id);
+    delete from public.hubs h where h.id = any(orphaned) and not exists (select 1 from hub_members m where m.hub_id = h.id and m.status = 'active');
   end if;
 end $$;
 
@@ -849,6 +923,7 @@ grant execute on all functions in schema public to authenticated;
 revoke execute on function public.notify(uuid, text, text) from authenticated;
 revoke execute on function public.notify_slot(uuid, text, text, uuid) from authenticated;
 revoke execute on function public.notify_group(uuid, text, text) from authenticated;
+revoke execute on function public.notify_hub(uuid, text, text, uuid) from authenticated;
 
 -- Morning reminders about unconfirmed slots. Needs pg_cron: Supabase > Database > Extensions > pg_cron. Then run this file again.
 do $$
