@@ -588,13 +588,14 @@ const saveHub = (id) => { try { localStorage.setItem(HUB_KEY, id); } catch (e) {
 
 /* ---------- who can join a group ---------- */
 const JOIN_POLICIES = {
+  open: { label: 'Anyone with the link', short: 'Open to anyone with the link', hint: 'Anyone with the code or link joins straight away, with no approval.' },
   approval: { label: 'You approve each family', short: 'You approve each one', hint: 'Anyone with the code or link can ask to join. They get in once an admin approves them. People you invite by email go straight in.' },
   invite: { label: 'Invite only', short: 'Invite only', hint: 'Only the email addresses you invite can join. The code or link does nothing for anyone else.' },
 };
 const policyOf = (h) => JOIN_POLICIES[(h && h.join_policy) || 'approval'] || JOIN_POLICIES.approval;
 function JoinPolicy({ value, onChange }) {
   return html`<div class="stack" style="gap:8px"><span>Who can join?</span>
-    <div class="who-card">${Object.entries(JOIN_POLICIES).map(([v, x]) => html`<button type="button" class=${value === v ? 'on' : ''} aria-pressed=${value === v} onClick=${() => onChange(v)}>${v === 'invite' ? I.mail : I.shield}${x.label}</button>`)}</div>
+    <div class="who-card" style="grid-template-columns:repeat(3,1fr);gap:8px">${Object.entries(JOIN_POLICIES).map(([v, x]) => html`<button type="button" class=${value === v ? 'on' : ''} aria-pressed=${value === v} onClick=${() => onChange(v)}>${v === 'invite' ? I.mail : v === 'open' ? I.route : I.shield}${x.label}</button>`)}</div>
     <span class="small muted">${JOIN_POLICIES[value].hint}</span>
   </div>`;
 }
@@ -997,7 +998,7 @@ function HubOverview({ a }) {
       <div>${I.car}<span class="big" style="font-size:18px">${fmt(fp.trips)}</span><span class="lbl">car trips per month</span></div>
       <div>${I.co2}<span class="big" style="font-size:18px">${fmt(fp.co2)} kg</span><span class="lbl">of carbon</span></div>
       <div>${I.jam}<span class="big" style="font-size:18px">Gate</span><span class="lbl">congestion</span></div>
-    </div></div>` : html`<div class="card note"><p style="margin:0">${h.join_policy === 'invite' ? html`This group is invite only. Invite families by email; they can find each other nearby and share the ${k.run}.` : html`Share the group code <b>${h.code}</b> or your invite link. You approve each family who asks to join; then they can find each other nearby and share the ${k.run}.`}</p></div>`}
+    </div></div>` : html`<div class="card note"><p style="margin:0">${h.join_policy === 'invite' ? html`This group is invite only. Invite families by email; they can find each other nearby and share the ${k.run}.` : h.join_policy === 'open' ? html`Share the group code <b>${h.code}</b> or your invite link. Anyone with it joins straight away; then they can find each other nearby and share the ${k.run}.` : html`Share the group code <b>${h.code}</b> or your invite link. You approve each family who asks to join; then they can find each other nearby and share the ${k.run}.`}</p></div>`}
     ${!a.commuting && h.kind !== 'school' ? html`<div class="card flat" style="gap:10px"><span><b>Is your own family travelling too?</b> This is optional. You can also share the ${k.run} with other ${k.people}, as a parent, from this same account.</span><div><button class="btn sm ghost" disabled=${a.busy} onClick=${async () => { await a.run(() => rpc('join_hub', { p_code: h.code }), 'Now set up your own family’s trips'); await a.reload(); a.go('setup'); }}>Set up my own family’s trips</button></div></div>` : ''}
     <${Action} onClick=${() => a.go('invite')}>Invite ${k.people}<//>
   </main>`;
@@ -1044,7 +1045,7 @@ function InviteFamilies({ a }) {
     <div class="card">
       <h3>Share your invite link</h3>
       <p class="muted" style="margin:0">Send this link by email, text or WhatsApp. It takes people straight to sign-up with your group code (<b>${a.hub.code}</b>) filled in.</p>
-      <p class="small" style="margin:0">${a.hub.join_policy === 'invite' ? html`<b>This group is invite only.</b> The link works only for the email addresses you invite below. Change this under ${k.people[0].toUpperCase() + k.people.slice(1)}, Group, Edit details.` : html`Anyone who uses the link asks to join, and you approve them. People you invite by email below go straight in.`}</p>
+      <p class="small" style="margin:0">${a.hub.join_policy === 'invite' ? html`<b>This group is invite only.</b> The link works only for the email addresses you invite below. Change this under ${k.people[0].toUpperCase() + k.people.slice(1)}, Group, Edit details.` : a.hub.join_policy === 'open' ? html`Anyone who uses the link joins straight away. To check each family first, change “who can join” under Group, Edit details.` : html`Anyone who uses the link asks to join, and you approve them. People you invite by email below go straight in.`}</p>
       <div class="copybox"><code id="invite-link">${link}</code><button class="btn green sm" onClick=${copy}>Copy</button></div>
     </div>
     <form class="card" onSubmit=${add}>
@@ -1308,7 +1309,7 @@ function AdminHubs({ a, hubs, reload }) {
     <div class="trow thead" style="grid-template-columns:1fr auto"><span>${list.length} of ${hubs.length} groups</span><span></span></div>
     ${list.map(h => html`<button class=${'trow rowbtn' + (open === h.id ? ' on' : '')} style="grid-template-columns:24px 1fr auto" aria-expanded=${open === h.id} onClick=${() => { setOpen(open === h.id ? null : h.id); setView('people'); }}>
         <span style="color:var(--ink-2)">${kindOf(h).icon()}</span>
-        <span style="min-width:0"><b>${h.name}</b><br/><span class="small muted">${kindOf(h).label} · ${h.code} · ${h.address}</span><br/><span class="small muted">${h.members} ${h.members == 1 ? 'person' : 'people'} · ${h.commutes} commute${h.commutes == 1 ? '' : 's'} · ${h.groups} sharing group${h.groups == 1 ? '' : 's'}${Number(h.requests) ? ` · ${h.requests} asked to join` : ''}${h.join_policy === 'invite' ? ' · invite only' : ''}</span></span>
+        <span style="min-width:0"><b>${h.name}</b><br/><span class="small muted">${kindOf(h).label} · ${h.code} · ${h.address}</span><br/><span class="small muted">${h.members} ${h.members == 1 ? 'person' : 'people'} · ${h.commutes} commute${h.commutes == 1 ? '' : 's'} · ${h.groups} sharing group${h.groups == 1 ? '' : 's'}${Number(h.requests) ? ` · ${h.requests} asked to join` : ''}${h.join_policy === 'invite' ? ' · invite only' : h.join_policy === 'open' ? ' · open link' : ''}</span></span>
         ${Number(h.admins) ? '' : html`<span class="tag red">No admin</span>`}
       </button>
       ${open === h.id ? html`<div class="rowacts col">

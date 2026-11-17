@@ -25,7 +25,10 @@ create table if not exists public.hubs (
 alter table public.hubs add column if not exists trip_date date;
 -- Who can join. 'approval': anyone with the code or link can ask, and an admin approves them (people the admin invited by email go straight in).
 -- 'invite': invite only. Only the emails the admin invited can join; the code or link does nothing for anyone else.
-alter table public.hubs add column if not exists join_policy text not null default 'approval' check (join_policy in ('approval', 'invite'));
+-- 'open': anyone with the code or link joins straight away (how every group worked before).
+alter table public.hubs add column if not exists join_policy text not null default 'approval';
+alter table public.hubs drop constraint if exists hubs_join_policy_check;
+alter table public.hubs add constraint hubs_join_policy_check check (join_policy in ('open', 'approval', 'invite'));
 
 create table if not exists public.profiles (
   id uuid primary key references auth.users on delete cascade,
@@ -398,8 +401,8 @@ begin
 end $$;
 
 -- Join a hub with its code. Also used by an admin of a hub to start sharing trips there themselves.
--- Someone the admin invited by email goes straight in. Anyone else asks to join and waits for an admin to approve them,
--- unless the group is invite only, when they're turned away.
+-- Someone the admin invited by email goes straight in, and so does anyone when the group is open. Otherwise they ask to join
+-- and wait for an admin to approve them, unless the group is invite only, when they're turned away.
 create or replace function public.join_hub(p_code text)
 returns public.hubs language plpgsql security definer set search_path = public as $$
 declare h hubs; me profiles; m hub_members; who text;
@@ -415,7 +418,7 @@ begin
   end if;
   if m.status = 'pending' then return h; end if;
   who := me.first_name || ' ' || me.last_name;
-  if invited_to(h.id) then
+  if invited_to(h.id) or h.join_policy = 'open' then
     insert into hub_members (hub_id, user_id, status) values (h.id, auth.uid(), 'active') on conflict do nothing;
     insert into commutes (parent_id, hub_id, drop_time, pick_time) values (auth.uid(), h.id, h.open_time, h.close_time) on conflict do nothing;
     perform notify_hub(a.user_id, 'school', who || ' joined ' || h.name || ' on Scata.', h.id)
