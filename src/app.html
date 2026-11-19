@@ -234,6 +234,9 @@ h3 { font-size: 17px; margin: 0; font-weight: 700; text-wrap: balance; }
 .maplink svg { width: 18px; height: 18px; color: var(--red); }
 .demo-note { font-size: 12px; color: var(--ink-3); text-align: center; }
 .btn.danger { background: var(--red); color: #fff; }
+.cantgrid { display: grid; gap: 6px; align-items: center; }
+.cant { border: 1px solid var(--line); background: var(--green-soft); color: var(--green); border-radius: 8px; height: 34px; font-weight: 800; }
+.cant.on { background: var(--surface); color: var(--red); border-color: var(--red); }
 .pill.danger { background: transparent; color: var(--red); border: 1px solid var(--red); }
 .danger-zone { border-color: var(--red-soft); box-shadow: none; }
 .table .rowbtn { width: 100%; background: none; border-left: 0; border-right: 0; border-bottom: 0; text-align: left; color: inherit; }
@@ -568,6 +571,11 @@ const mapState = (a) => ({ school: a.hub ? { name: a.hub.name, eircode: a.hub.ad
 // often opens the app in a new tab or another browser window, where sessionStorage is empty.
 const initialCode = (() => { try { const u = new URLSearchParams(location.search); const c = u.get('join') || u.get('school'); if (c) { sessionStorage.setItem('scata-code', c); localStorage.setItem('scata-code', c); } return c || sessionStorage.getItem('scata-code') || localStorage.getItem('scata-code') || ''; } catch (e) { return ''; } })();
 const clearCode = () => { try { sessionStorage.removeItem('scata-code'); localStorage.removeItem('scata-code'); } catch (e) {} };
+// A friend link also names the commute to ask to join, once this family has set up its trips.
+const COMMUTE_KEY = 'scata-commute';
+(() => { try { const c = new URLSearchParams(location.search).get('commute'); if (c && /^[0-9a-f-]{36}$/i.test(c)) localStorage.setItem(COMMUTE_KEY, c); } catch (e) {} })();
+const friendCommute = () => { try { return localStorage.getItem(COMMUTE_KEY); } catch (e) { return null; } };
+const clearFriendCommute = () => { try { localStorage.removeItem(COMMUTE_KEY); } catch (e) {} };
 const HUB_KEY = 'scata-hub';
 const savedHub = () => { try { return localStorage.getItem(HUB_KEY); } catch (e) { return null; } };
 const saveHub = (id) => { try { localStorage.setItem(HUB_KEY, id); } catch (e) {} };
@@ -654,6 +662,14 @@ function App() {
       if ((opts.initial && route !== 'newPassword') || opts.land) setRoute(landing);
     } catch (e) { say(e.message); setD(x => ({ ...x, loaded: true })); }
   };
+  // After signing up through a friend link and setting up their trips, ask to join that friend's commute.
+  useEffect(() => {
+    const gid = friendCommute();
+    if (!gid || !d.commute || !d.commute.accepted_terms) return;
+    rpc('ask_to_join', { p_group: gid, p_source: 'friend' })
+      .then(() => { clearFriendCommute(); say('We’ve asked your friend to add you to their commute'); load(); },
+            (e) => { if (!/set up your own commute/i.test(e.message)) { clearFriendCommute(); say(e.message); } });
+  }, [d.commute && d.commute.accepted_terms, d.hub && d.hub.id]);
   useEffect(() => { if (session) load({ initial: true }); else if (session === null) { setD({ loaded: true }); if (!['register', 'checkEmail', 'forgot'].includes(route)) setRoute('login'); } }, [uid]);
 
   // Live updates: my notifications (invites, swaps, chat) refresh what I see.
@@ -1170,21 +1186,46 @@ function HubPeople({ a, hub, onChange }) {
   </div>`;
 }
 
-// The commute groups families formed inside a group.
+// The commute groups families formed inside a group, how much room each has, and the families still waiting.
+// An admin can suggest a waiting family for a commute; the family and the parent who started it both say yes.
 function HubCommutes({ a, hub, onChange }) {
   const [rows, setRows] = useState(null);
-  const load = () => rpc('hub_groups', { p_hub: hub.id }).then(setRows, e => { a.say(e.message); setRows([]); });
-  useEffect(() => { setRows(null); load(); }, [hub.id]);
+  const [waiting, setWaiting] = useState([]);
+  const [open, setOpen] = useState(null);
+  const [pick, setPick] = useState('');
+  const load = () => Promise.all([
+    rpc('hub_groups', { p_hub: hub.id }).then(setRows, e => { a.say(e.message); setRows([]); }),
+    rpc('hub_waiting', { p_hub: hub.id }).then(setWaiting, () => setWaiting([])),
+  ]);
+  useEffect(() => { setRows(null); setOpen(null); load(); }, [hub.id]);
   const end = async (g) => {
     if (!confirm(`End ${g.owner}’s commute? Its rota and chat will be removed for everyone in it.`)) return;
     try { await a.run(() => rpc('delete_commute_group', { p_group: g.id }), 'Commute ended'); } catch (e) { return; }
     await load(); if (onChange) onChange();
   };
+  const suggest = async (g) => {
+    const w = waiting.find(x => x.parent_id === pick); if (!w) return;
+    try { await a.run(() => rpc('admin_suggest', { p_group: g.id, p_parent: pick }), `Suggested ${w.name} to ${g.owner}`); } catch (e) { return; }
+    setPick(''); setOpen(null); await load();
+  };
+  const fits = (g) => waiting.filter(w => w.mode === g.mode && LEGS(g.covers).every(l => (w.free || []).includes(l)) && !(g.owner === w.name));
   return html`<div class="table">
     <div class="trow thead" style="grid-template-columns:1fr auto"><span>Started by, and who’s in it</span><span></span></div>
     ${rows === null ? html`<div class="trow" style="grid-template-columns:1fr"><span class="muted">Loading…</span></div>` : ''}
-    ${(rows || []).map(g => html`<div class="trow" style="grid-template-columns:1fr auto"><span><b>${g.owner}</b><br/><span class="small muted">${g.members ? 'With ' + g.members : 'No one has accepted yet'}${Number(g.pending) ? ` · ${g.pending} invite${g.pending > 1 ? 's' : ''} waiting` : ''}</span></span><button class="pill danger" disabled=${a.busy} onClick=${() => end(g)}>End</button></div>`)}
+    ${(rows || []).map(g => html`<button class=${'trow rowbtn' + (open === g.id ? ' on' : '')} style="grid-template-columns:1fr auto" aria-expanded=${open === g.id} onClick=${() => { setOpen(open === g.id ? null : g.id); setPick(''); }}>
+        <span><b>${g.owner}</b><br/><span class="small muted">${g.members ? 'With ' + g.members : 'No one has joined yet'}${Number(g.pending) ? ` · ${g.pending} waiting to answer` : ''}</span><br/>
+          <span class="small muted">${coversLabel(hub, g.covers)} · ${MODE_NAME[g.mode]} · ${g.mode === 'car' ? `${g.families} of ${MAX_FAMILIES} families, ${g.spare ? plural(g.spare, 'seat', 'seats') + ' free' : 'full'}` : `${g.kids} of ${MAX_WALKERS} children`}</span></span>
+        <span class=${'status ' + (g.families > 1 ? 'accepted' : 'pending')}>${g.families > 1 ? (g.spare ? 'Room' : 'Full') : 'Needs families'}</span>
+      </button>
+      ${open === g.id ? html`<div class="rowacts" style="flex-wrap:wrap">
+        ${g.spare && fits(g).length ? html`<select aria-label="Family to suggest" value=${pick} onChange=${e => setPick(e.target.value)} style="max-width:100%"><option value="">Suggest a waiting family…</option>${fits(g).map(w => html`<option value=${w.parent_id}>${w.name} (${plural(w.kids, 'child', 'children')})</option>`)}</select>
+          <button class="pill" disabled=${a.busy || !pick} onClick=${() => suggest(g)}>Suggest</button>` : ''}
+        <button class="pill danger" disabled=${a.busy} onClick=${() => end(g)}>End</button>
+      </div>` : ''}`)}
     ${rows && !rows.length ? html`<div class="trow" style="grid-template-columns:1fr"><span class="muted">No families are sharing trips yet.</span></div>` : ''}
+    <div class="trow thead" style="grid-template-columns:1fr auto"><span>Waiting for a match (${waiting.length})</span><span></span></div>
+    ${waiting.map(w => html`<div class="trow" style="grid-template-columns:1fr auto"><span><b>${w.name}</b><br/><span class="small muted">${MODE_NAME[w.mode]} · ${plural(w.kids, 'child', 'children')} · since ${when(w.since)}</span></span><span></span></div>`)}
+    ${!waiting.length ? html`<div class="trow" style="grid-template-columns:1fr"><span class="muted small">Every family who set up their trips shares them with another family.</span></div>` : ''}
   </div>`;
 }
 
@@ -1205,6 +1246,12 @@ function Reports({ a }) {
       <div>${I.route}<span class="big">${st.commutes}</span><span class="lbl">commutes set up</span></div>
       <div>${I.car}<span class="big">${st.groups}</span><span class="lbl">sharing groups</span></div>
     </div></div>
+    <div class="card"><h3>Matching</h3><div class="stats" style=${`grid-template-columns:repeat(${a.hub.join_policy === 'invite' || Number(st.invited) ? 4 : 3},1fr)`}>
+      ${a.hub.join_policy === 'invite' || Number(st.invited) ? html`<div>${I.mail}<span class="big">${st.invited}</span><span class="lbl">invited</span></div>` : ''}
+      <div>${I.parent}<span class="big">${st.members}</span><span class="lbl">joined</span></div>
+      <div>${I.heart}<span class="big">${st.grouped}</span><span class="lbl">in a group</span></div>
+      <div>${I.info}<span class="big">${st.waiting}</span><span class="lbl">waiting</span></div>
+    </div><p class="small muted" style="margin:0">Waiting means a family set up its trips but doesn’t share them with anyone yet. See who under ${a.kind.people[0].toUpperCase() + a.kind.people.slice(1)} → Commutes, where you can suggest them for a commute with room. Encouraging more families near them to sign up helps most.</p></div>
     <div class="card"><h3>${isTrip(a.hub) ? 'Estimated savings on this trip' : 'Estimated yearly savings'}</h3><${Stats} s=${total} labels=${isTrip(a.hub) ? ['this trip', 'CO₂ this trip', 'parent time'] : ['a year', 'CO₂ a year', 'parent time']} /><p class="demo-note" style="margin:0">Estimate from each family’s chosen travel mode, ${isTrip(a.hub) ? '10 km round trip, there and back once.' : `10 km round trip, ${a.hub.days.length} day${a.hub.days.length > 1 ? 's' : ''} a week over a school year.`}</p></div>
     <div class="card">
       <h3>Commutes by travel type</h3>
@@ -1312,7 +1359,9 @@ function AdminHubs({ a, hubs, reload }) {
 function Hello({ a }) { return html`<div class="hello"><h1>Hi, ${a.profile.first_name}!</h1><p>${a.hub ? a.hub.name : ''}</p></div>`; }
 
 function Setup({ a }) {
-  const [c, setC] = useState({ ...a.commute });
+  const [c, setC] = useState({ ...a.commute, cant_drop: a.commute.cant_drop || [], cant_pick: a.commute.cant_pick || [] });
+  const cant = (k, d) => (c['cant_' + k] || []).includes(d);
+  const toggleCant = (k, d) => set('cant_' + k, cant(k, d) ? c['cant_' + k].filter(x => x !== d) : [...c['cant_' + k], d].sort());
   const [kid, setKid] = useState({ name: '', dob: '' });
   const [tried, setTried] = useState(false);
   const needKid = !(a.children || []).length;
@@ -1324,7 +1373,7 @@ function Setup({ a }) {
     const home = tidyPlace(c.home);
     const changedHome = home !== a.commute.home || a.commute.lat == null;
     const pos = changedHome && home ? await geocode(home + ', Ireland') : null;
-    const patch = { home, mode: c.mode, seats: c.seats, drop_time: legTime(a.hub, 'drop'), pick_time: legTime(a.hub, 'pick'), updated_at: new Date().toISOString(), ...(pos ? { lat: pos.lat, lng: pos.lng } : {}) };
+    const patch = { home, mode: c.mode, seats: c.seats, cant_drop: c.cant_drop, cant_pick: c.cant_pick, drop_time: legTime(a.hub, 'drop'), pick_time: legTime(a.hub, 'pick'), updated_at: new Date().toISOString(), ...(pos ? { lat: pos.lat, lng: pos.lng } : {}) };
     await a.run(() => a.updateCommute(patch));
     if (changedHome && home && !pos) a.say('We couldn’t find that address on the map. Try adding the Eircode.');
     await a.reload(); a.go('match');
@@ -1349,6 +1398,12 @@ function Setup({ a }) {
         <${Field} id="su-home" label="Home Eircode or address" value=${c.home || ''} onInput=${v => set('home', v)} hint="Only used to find families near you. Other parents never see it." err=${tried && !c.home && 'Enter your Eircode or address'} />
         <div class="card flat" style="gap:6px"><span>${a.kind.dropAt} <b>${legTime(a.hub, 'drop')}</b> · ${a.kind.pickAt.replace(/^./, x => x.toLowerCase())} <b>${legTime(a.hub, 'pick')}</b></span><span class="small muted">${a.hub.name} sets these times for everyone. ${a.kind.timeHint}</span></div>
       </div>
+      ${isTrip(a.hub) ? '' : html`<div class="stack" style="gap:10px"><span class="center">Any trips you can’t do?</span>
+        <div class="cantgrid" style=${`grid-template-columns:auto repeat(${a.hub.days.length},1fr)`}>
+          <span></span>${a.hub.days.map(d => html`<span class="small muted center">${DAYS[d].slice(0, 3)}</span>`)}
+          ${['drop', 'pick'].map(k => html`<span class="small" style="font-weight:700">${legName(a.hub, k)[0].toUpperCase() + legName(a.hub, k).slice(1)}</span>${a.hub.days.map(d => html`<button type="button" class=${'cant' + (cant(k, d) ? ' on' : '')} aria-pressed=${cant(k, d)} aria-label=${`${cant(k, d) ? 'Can’t do' : 'Can do'} ${DAYS[d]} ${legName(a.hub, k)}`} onClick=${() => toggleCant(k, d)}>${cant(k, d) ? '✕' : '✓'}</button>`)}`)}
+        </div>
+        <span class="small muted center">Tap a day to mark it ✕. The rota gives those trips to other families when it can.</span></div>`}
     </div>
     <div class="action"><button class="btn" disabled=${a.busy} onClick=${save}>${a.busy ? 'Saving…' : 'Let’s Go!'}</button></div>
   </main>`;
@@ -1403,56 +1458,188 @@ function Terms({ a }) {
   </main>`;
 }
 
+/* ---------- commute groups: trips covered, room left, suggestions ---------- */
+const LEGS = (covers) => covers === 'drop' ? ['drop'] : covers === 'pick' ? ['pick'] : ['drop', 'pick'];
+const coversLabel = (h, c) => (isTrip(h) ? { both: 'Lift there and home', drop: 'Lift there only', pick: 'Lift home only' } : { both: 'Drop-offs and pick-ups', drop: 'Drop-offs only', pick: 'Pick-ups only' })[c] || '';
+const legsWord = (h, legs) => legs.length === 2 ? (isTrip(h) ? 'lifts' : 'trips') : `${legName(h, legs[0])}${isTrip(h) ? '' : 's'}`;
+// The trips (drop, pick) I don't share in a commute yet: one I started or joined covers each trip at most once.
+const freeLegs = (a) => { const used = new Set(); (a.groups || []).filter(g => g.status === 'accepted').forEach(g => LEGS(g.covers).forEach(l => used.add(l))); return ['drop', 'pick'].filter(l => !used.has(l)); };
+// Room left in a commute. Car: everyone drives in turn, so all the children must fit the smallest car, and 4 families at most.
+// Walking, cycling and bus: up to 12 children, with a second adult on each trip above 6.
+const MAX_FAMILIES = 4, MAX_WALKERS = 12, PER_ADULT = 6;
+function spaceOf(accepted, mode) {
+  const families = accepted.length;
+  const kids = accepted.reduce((s, p) => s + Math.max(1, Number(p.kids || 0)), 0);
+  if (mode !== 'car') return { families, kids, places: MAX_WALKERS, spare: Math.max(0, MAX_WALKERS - kids), full: kids >= MAX_WALKERS ? 'This group has 12 children, the most for a walking, cycling or bus group.' : '' };
+  const places = Math.min(...accepted.map(p => Number(p.places || 0)));
+  const spare = families >= MAX_FAMILIES ? 0 : Math.max(0, places - kids);
+  return { families, kids, places, spare, full: families >= MAX_FAMILIES ? 'Your commute has 4 families, the most for a car group.' : spare ? '' : 'The smallest car in your commute is full.' };
+}
+const ownerOf = (a, gid) => (a.people[gid] || []).find(p => p.is_owner) || { first_name: 'A parent', last_name: '' };
+const commuteName = (a, g) => g.mine ? 'Your commute' : `${ownerOf(a, g.id).first_name}’s commute`;
+const friendLink = (a, gid) => `${SITE}?join=${a.hub.code}&commute=${gid}`;
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+const shareOrCopy = async (a, text, url) => {
+  try { if (navigator.share) { await navigator.share({ text, url }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(url); a.say('Link copied. Send it to your friend.'); } catch (e) { prompt('Copy this link and send it to your friend:', url); }
+};
+
+// Invitations, and suggestions from the school or club, waiting for my answer. Requests I've sent, waiting for theirs.
 function PendingInvites({ a }) {
-  const pending = (a.groups || []).filter(g => !g.mine && g.status === 'pending');
-  if (!pending.length) return '';
-  return html`${pending.map(g => { const owner = (a.people[g.id] || []).find(p => p.is_owner) || { first_name: 'A parent', last_name: '' };
+  const list = (a.groups || []).filter(g => !g.mine && g.status === 'pending');
+  if (!list.length) return '';
+  const answer = async (g, yes) => { await a.run(() => rpc('respond_invite', { p_group: g.id, p_accept: yes }), yes ? (g.group_ok ? 'You joined the commute' : 'Thanks. We’ve asked them too.') : 'Declined'); await a.reload(); };
+  const cancel = async (g) => { await a.run(() => rpc('leave_group', { p_group: g.id }), 'Request cancelled'); await a.reload(); };
+  return html`${list.map(g => { const o = ownerOf(a, g.id); const who = o.first_name + ' ' + o.last_name;
+    if (g.family_ok) return html`<div class="card flat" style="gap:10px"><span><b>Request sent to ${o.first_name}’s commute</b> (${coversLabel(a.hub, g.covers).toLowerCase()}). We’ll tell you when they answer.</span><div><button class="pill out" disabled=${a.busy} onClick=${() => cancel(g)}>Cancel request</button></div></div>`;
     return html`<div class="card" style="background:var(--green-soft);border-color:transparent">
-      <div class="row"><${Avatar} name=${owner.first_name + ' ' + owner.last_name} /><div class="grow"><b>${owner.first_name} ${owner.last_name}</b> invited you to share the ${a.kind.run} to ${a.hub.name}.</div></div>
-      <div class="row" style="gap:8px"><button class="btn green" disabled=${a.busy} onClick=${async () => { await a.run(() => rpc('respond_invite', { p_group: g.id, p_accept: true }), 'You joined the commute'); await a.reload(); }}>Accept</button><button class="btn sm ghost" disabled=${a.busy} onClick=${async () => { await a.run(() => rpc('respond_invite', { p_group: g.id, p_accept: false }), 'Invitation declined'); await a.reload(); }}>Decline</button></div>
+      <div class="row"><${Avatar} name=${who} /><div class="grow">${g.source === 'admin' ? html`<b>${a.hub.name}</b> suggested you share the ${a.kind.run} with <b>${who}</b>’s commute.` : html`<b>${who}</b> invited you to share the ${a.kind.run} to ${a.hub.name}.`}<div class="small muted">${coversLabel(a.hub, g.covers)} · ${MODE_NAME[g.mode]}${g.group_ok ? '' : ` · ${o.first_name} will be asked too`}</div></div></div>
+      <div class="row" style="gap:8px"><button class="btn green" disabled=${a.busy} onClick=${() => answer(g, true)}>Accept</button><button class="btn sm ghost" disabled=${a.busy} onClick=${() => answer(g, false)}>Decline</button></div>
     </div>`; })}`;
 }
 
 function GroupPicker({ a }) {
   const usable = (a.groups || []).filter(g => g.status === 'accepted');
   if (usable.length < 2) return '';
-  const label = (g) => g.mine ? 'My commute' : `${((a.people[g.id] || []).find(p => p.is_owner) || {}).first_name || 'A parent'}’s commute`;
-  return html`<div class="field"><label for="grp">Commute</label><select id="grp" onChange=${e => a.setGid(e.target.value)}>${usable.map(g => html`<option value=${g.id} selected=${g.id === a.gid}>${label(g)}</option>`)}</select></div>`;
+  return html`<div class="field"><label for="grp">Commute</label><select id="grp" onChange=${e => a.setGid(e.target.value)}>${usable.map(g => html`<option value=${g.id} selected=${g.id === a.gid}>${commuteName(a, g)} · ${coversLabel(a.hub, g.covers).toLowerCase()}</option>`)}</select></div>`;
+}
+
+// Who's in the commute I'm looking at, how much room is left, and requests to answer.
+function CommuteCard({ a, g }) {
+  const people = (a.people[g.id] || []).filter(p => p.status !== 'declined');
+  const accepted = people.filter(p => p.status === 'accepted');
+  const sp = spaceOf(accepted, g.mode);
+  const after = async (fn, ok) => { try { await a.run(fn, ok); } catch (e) { return; } await a.reload(); };
+  const recent = (p) => ['suggested', 'admin'].includes(p.source) && p.joined_at && Date.now() - new Date(p.joined_at) < 864e5;
+  const state = (p) => {
+    if (p.status === 'accepted') return p.is_owner ? html`<span class="small muted">Started it</span>` : html`<span class="status accepted">✓ In</span>`;
+    if (!p.group_ok && g.mine) return html`<span class="row" style="gap:6px"><button class="pill" disabled=${a.busy} onClick=${() => after(() => rpc('respond_request', { p_group: g.id, p_parent: p.parent_id, p_accept: true }), p.family_ok ? `${p.first_name} joined your commute` : `We’ve asked ${p.first_name} too`)}>Approve</button><button class="pill danger" disabled=${a.busy} onClick=${() => after(() => rpc('respond_request', { p_group: g.id, p_parent: p.parent_id, p_accept: false }), 'Declined')}>Decline</button></span>`;
+    return html`<span class="status pending">${p.group_ok ? 'Invited' : 'Waiting for ' + ownerOf(a, g.id).first_name}</span>`;
+  };
+  const why = (p) => p.status === 'accepted' ? '' : !p.group_ok ? (p.source === 'admin' ? ` · ${a.hub.name} suggested them` : p.source === 'friend' ? ' · came with your friend link' : ' · asked to join') : '';
+  return html`<div class="card" style="gap:12px">
+    <div class="row"><span class="mode on" style="width:44px;height:44px;cursor:default;flex:none">${MODE_ICON[g.mode]}</span><div class="grow"><h3>${commuteName(a, g)}</h3><div class="small muted">${coversLabel(a.hub, g.covers)} · ${MODE_NAME[g.mode]}</div></div></div>
+    <div class="small">${g.mode === 'car'
+      ? html`<b>${sp.families} of ${MAX_FAMILIES}</b> families · <b>${sp.kids} of ${sp.places}</b> seats for children${sp.spare ? ` · ${plural(sp.spare, 'seat', 'seats')} free` : ''}`
+      : html`<b>${sp.kids} of ${MAX_WALKERS}</b> children${sp.kids > PER_ADULT ? ' · two adults on each trip' : ''}${sp.spare ? ` · room for ${sp.spare} more` : ''}`}</div>
+    ${g.mode === 'car' ? html`<p class="small muted" style="margin:0">Everyone drives in turn, so every car must fit all the children. The group is full when the smallest car is, or at 4 families.</p>` : ''}
+    <div class="stack" style="gap:8px">${people.map(p => html`<div class="row" style="gap:10px">
+      <${Avatar} name=${p.first_name + ' ' + p.last_name} size="sm" />
+      <div class="grow" style="min-width:0"><b>${p.parent_id === a.uid ? 'You' : p.first_name + ' ' + p.last_name}</b><div class="small muted">${plural(Math.max(1, Number(p.kids || 0)), 'child', 'children')}${why(p)}</div></div>
+      ${state(p)}
+      ${!g.mine && p.status === 'accepted' && p.parent_id !== a.uid && !p.is_owner && recent(p) ? html`<button class="pill out" disabled=${a.busy} onClick=${() => { if (confirm(`Object to ${p.first_name} joining? They’ll be taken out of the commute. They won’t be told who objected.`)) after(() => rpc('object_member', { p_group: g.id, p_parent: p.parent_id }), `${p.first_name} was taken out of the commute`); }}>Object</button>` : ''}
+    </div>`)}</div>
+  </div>`;
+}
+
+// The parent who started a commute fills its spare seats: families they know (by name or a friend link), then Scata's suggestions.
+function FillSeats({ a, g, wide, setWide }) {
+  const accepted = (a.people[g.id] || []).filter(p => p.status === 'accepted');
+  const sp = spaceOf(accepted, g.mode);
+  const [q2, setQ] = useState('');
+  const [found, setFound] = useState(null);
+  const [sugg, setSugg] = useState(null);
+  const [all, setAll] = useState(null);
+  const key = JSON.stringify(a.people[g.id] || []);
+  const loadSugg = () => rpc('suggest_families', { p_group: g.id, p_wide: wide }).then(setSugg, e => { a.say(e.message); setSugg([]); });
+  useEffect(() => { setSugg(null); loadSugg(); }, [g.id, wide, key]);
+  useEffect(() => {
+    if (q2.trim().length < 2) { setFound(null); return; }
+    const t = setTimeout(() => rpc('search_families', { p_hub: a.hub.id, p_q: q2.trim(), p_group: g.id }).then(setFound, () => setFound([])), 250);
+    return () => clearTimeout(t);
+  }, [q2, g.id, key]);
+  const invite = async (p, source) => {
+    try { await a.run(() => rpc('invite_to_group', { p_group: g.id, p_target: p.parent_id, p_source: source }), `Invite sent to ${p.first_name}`); } catch (e) { return; }
+    await a.reload();
+  };
+  const status = (s) => s === 'accepted' ? html`<span class="status accepted">✓ In</span>` : s === 'pending' ? html`<span class="status pending">Pending</span>` : s === 'declined' ? html`<span class="status declined">Declined</span>` : null;
+  const legs = LEGS(g.covers);
+  if (sp.full) return html`<div class="card flat"><span><b>${sp.full}</b> ${accepted.length > 1 ? 'See the rota below.' : ''}</span></div>`;
+  return html`
+    <div class="card" style="gap:12px">
+      <div><h3>Invite families you know</h3><p class="muted small" style="margin:4px 0 0">Search ${a.hub.name} by name, or send a link to a friend who isn’t on Scata yet.</p></div>
+      <div class="search" style="border:1px solid var(--line);border-radius:12px">${I.search}<input placeholder="Type a name…" aria-label="Search families by name" value=${q2} onInput=${e => setQ(e.target.value)} /></div>
+      ${found && !found.length ? html`<p class="small muted" style="margin:0">No one at ${a.hub.name} matches “${q2.trim()}” yet. They may not have set up their trips, so try a friend link.</p>` : ''}
+      ${(found || []).map(p => html`<div class="person">
+        <${Avatar} name=${p.first_name + ' ' + p.last_name} />
+        <div class="grow"><b>${p.first_name} ${p.last_name}</b><div class="muted small">${plural(p.kids, 'child', 'children')}${p.km != null ? ` · ${p.km} km away` : ''} · ${MODE_NAME[p.mode]}</div>
+          ${g.mode === 'car' && p.detour_min > 5 ? html`<div class="small" style="color:var(--amber)">Collecting them adds about ${p.detour_min} minutes to your drive.</div>` : ''}
+          ${p.mode !== g.mode ? html`<div class="small muted">They’ve said they’re ${MODE_NAME[p.mode].toLowerCase()}.</div>` : ''}</div>
+        ${status(p.status) || (p.busy ? html`<span class="small muted" style="max-width:90px;text-align:right">Already sharing these ${legsWord(a.hub, legs)}</span>` : html`<button class="btn sm ghost" disabled=${a.busy} onClick=${() => invite(p, 'invite')}>Invite</button>`)}
+      </div>`)}
+      <div><button class="btn sm ghost" onClick=${() => shareOrCopy(a, `Join my ${a.kind.run} commute to ${a.hub.name} on Scata`, friendLink(a, g.id))}>${I.mail}Send a friend link</button></div>
+      <p class="small muted" style="margin:0">Friends who join with your link still need your OK, so a forwarded link can’t add a stranger.${a.hub.join_policy === 'invite' ? ` ${a.hub.name} is invite only, so they also need an invite from it.` : a.hub.join_policy === 'approval' ? ` ${a.hub.name} approves new families first.` : ''}</p>
+    </div>
+    <div class="card" style="gap:12px">
+      <div><h3>Fill your spare ${g.mode === 'car' ? 'seats' : 'places'}</h3><p class="muted small" style="margin:4px 0 0">${g.mode === 'car' ? plural(sp.spare, 'seat', 'seats') : plural(sp.spare, 'place', 'places')} free. These families travel to ${a.hub.name} the same way as you, live on your way${g.mode === 'car' ? ' and fit in every car' : ''}. Nearest first.</p></div>
+      ${sugg === null ? html`<p class="muted small" style="margin:0">Looking…</p>` : ''}
+      ${sugg && !sugg.length ? html`<p class="small" style="margin:0">No families on your route have room to join yet. We’ll tell you when one sets up their trips.${a.commute.lat == null ? ' We couldn’t place your home on the map, so add your Eircode under Edit my trips.' : ''}</p>` : ''}
+      ${(sugg || []).map(p => html`<div class="person">
+        <${Avatar} name=${p.first_name} />
+        <div class="grow"><b>${p.first_name}</b><div class="muted small">${plural(p.kids, 'child', 'children')} · ${p.km} km from your group${g.mode === 'car' && p.detour_min != null ? ` · about ${p.detour_min} min extra` : ''}</div></div>
+        <button class="btn sm ghost" disabled=${a.busy} onClick=${() => invite(p, 'suggested')}>Invite</button>
+      </div>`)}
+      <label class="check small" style="font-weight:600"><input type="checkbox" checked=${wide} onChange=${e => setWide(e.target.checked)} />Widen the search (twice as far, longer detours)</label>
+      <details onToggle=${e => { if (e.target.open && !all) rpc('nearby_parents', { p_hub: a.hub.id }).then(setAll, () => setAll([])); }}><summary class="small" style="cursor:pointer;font-weight:700">Everyone at ${a.hub.name} who has set up their trips</summary>
+        <div class="stack" style="gap:8px;margin-top:10px">${all === null ? html`<span class="muted small">Loading…</span>` : !all.length ? html`<span class="muted small">No one else yet.</span>` : all.map(n => html`<div class="row" style="gap:10px"><${Avatar} name=${n.first_name} size="sm" /><div class="grow"><b>${n.first_name}</b><div class="small muted">${plural(Number(n.kids), 'child', 'children')}${n.km != null ? ` · ${n.km} km` : ''} · ${MODE_NAME[n.mode]}</div></div><button class="pill out" disabled=${a.busy} onClick=${() => invite(n, 'invite')}>Invite</button></div>`)}</div>
+      </details>
+    </div>`;
+}
+
+// For trips I don't share yet: commutes with room on my route, the waiting list, or starting my own.
+function FindCommute({ a, free, wide, setWide }) {
+  const [list, setList] = useState(null);
+  const [covers, setCovers] = useState(free.length === 2 ? 'both' : free[0]);
+  useEffect(() => { setCovers(free.length === 2 ? 'both' : free[0]); }, [free.join()]);
+  const key = JSON.stringify(a.groups || []);
+  const load = () => rpc('suggest_groups', { p_hub: a.hub.id, p_wide: wide }).then(setList, e => { a.say(e.message); setList([]); });
+  useEffect(() => { setList(null); load(); }, [a.hub.id, wide, key]);
+  const ask = async (g) => { try { await a.run(() => rpc('ask_to_join', { p_group: g.id, p_source: 'suggested' }), `Request sent to ${g.owner_first}`); } catch (e) { return; } await a.reload(); };
+  const start = async () => {
+    let g; try { g = await a.run(() => rpc('start_group', { p_hub: a.hub.id, p_covers: covers }), 'Commute started. Now invite families.'); } catch (e) { return; }
+    await a.reload(); a.setGid(g.id);
+  };
+  const shared = (a.groups || []).some(g => g.status === 'accepted');
+  const asked = (a.groups || []).some(g => !g.mine && g.status === 'pending' && g.family_ok);
+  const options = free.length === 2 ? ['both', 'drop', 'pick'] : free;
+  const word = legsWord(a.hub, free);
+  return html`
+    <div class="card" style="gap:12px">
+      <div><h3>${shared ? `Find a commute for your ${word}` : 'Join a commute with room'}</h3><p class="muted small" style="margin:4px 0 0">Commutes on your route with room for your ${plural((a.children || []).length || 1, 'child', 'children')}. The parent who started it says yes too.</p></div>
+      ${list === null ? html`<p class="muted small" style="margin:0">Looking…</p>` : ''}
+      ${(list || []).map(g => html`<div class="person">
+        <${Avatar} name=${g.owner_first} />
+        <div class="grow"><b>${g.owner_first}’s commute</b><div class="muted small">${coversLabel(a.hub, g.covers)} · ${plural(g.families, 'family', 'families')} · ${a.commute.mode === 'car' ? plural(g.spare, 'seat', 'seats') + ' free' : `room for ${g.spare} more`} · ${g.km} km</div></div>
+        ${g.status === 'pending' ? html`<span class="status pending">Request sent</span>` : html`<button class="btn sm ghost" disabled=${a.busy} onClick=${() => ask(g)}>Ask to join</button>`}
+      </div>`)}
+      ${list && !list.length && asked ? html`<p class="small muted" style="margin:0">No other commute on your route has room right now.</p>` : ''}
+      ${list && !list.length && !asked ? html`<div class="card flat" style="gap:6px"><span><b>You’re on the waiting list.</b> No commute on your route has room yet. We’ll tell you when a family near you sets up their trips, and ${a.hub.name} can see you’re waiting.</span>${a.commute.lat == null ? html`<span class="small muted">We couldn’t place your home on the map. Add your Eircode under Edit my trips so we can find families near you.</span>` : ''}</div>` : ''}
+      <label class="check small" style="font-weight:600"><input type="checkbox" checked=${wide} onChange=${e => setWide(e.target.checked)} />Widen the search (twice as far, longer detours)</label>
+    </div>
+    <div class="card" style="gap:12px">
+      <div><h3>Or start your own commute</h3><p class="muted small" style="margin:4px 0 0">Then invite families you know, and Scata suggests others on your route to fill the seats.</p></div>
+      ${options.length > 1 ? html`<div class="field"><label for="covers">It covers</label><select id="covers" onChange=${e => setCovers(e.target.value)}>${options.map(o => html`<option value=${o} selected=${o === covers}>${coversLabel(a.hub, o)}</option>`)}</select><span class="hint">You can share mornings with one commute and afternoons with another.</span></div>` : html`<span class="small">${coversLabel(a.hub, options[0])}</span>`}
+      <div><button class="btn sm" disabled=${a.busy} onClick=${start}>Start a commute</button></div>
+    </div>`;
 }
 
 function Manage({ a }) {
-  const [nearby, refresh] = useNearby(a);
-  const myGroup = (a.groups || []).find(g => g.mine);
-  const members = myGroup ? (a.people[myGroup.id] || []).filter(p => !p.is_owner) : [];
-  const accepted = members.filter(m => m.status === 'accepted');
-  const capacity = a.commute.seats + 1;
-  const kidsIn = accepted.reduce((s, m) => s + Number(m.kids || 0), 0) + (a.children || []).length;
-  const left = Math.max(0, capacity - kidsIn);
-  const inOther = (a.groups || []).filter(g => !g.mine && g.status === 'accepted');
-  const sv = savings(a.commute.mode, Math.max(accepted.length, inOther.length ? (a.people[inOther[0].id] || []).filter(p => p.status === 'accepted').length - 1 : 0) + 1, tripCount(a.hub));
-  const invite = async (n) => { await a.run(() => rpc('invite_parent', { p_hub: a.hub.id, p_target: n.parent_id }), `Invite sent to ${n.first_name}`); await a.reload(); refresh(); };
-  const canRota = a.gid != null && (a.people[a.gid] || []).filter(p => p.status === 'accepted').length > 1;
+  const [wide, setWide] = useState(false);
+  const g = (a.groups || []).find(x => x.id === a.gid && x.status === 'accepted');
+  const accepted = g ? (a.people[g.id] || []).filter(p => p.status === 'accepted') : [];
+  const free = freeLegs(a);
+  const canRota = !!g && accepted.length > 1;
+  const sv = savings(a.commute.mode, Math.max(1, accepted.length), tripCount(a.hub));
   return html`<main class="screen">
     <${Hello} a=${a} />
     <${PendingInvites} a=${a} />
-    <div class="card center">
-      <h3>Invite families in your area</h3>
-      <span class="muted small">Trip capacity: <b>${Math.min(capacity, kidsIn)}/${capacity}</b></span>
-      <span class="muted small">${left ? `You can add ${left} more ${left === 1 ? 'child' : 'children'}` : 'Your commute is full'}</span>
-    </div>
-    ${nearby === null ? html`<p class="muted center">Looking for families near you…</p>` : ''}
-    ${nearby && !nearby.length ? html`<div class="card note"><p style="margin:0">No other families in ${a.hub.name} have set up their trips yet. ${a.isAdmin ? 'Share your invite link' : 'Ask whoever runs the group to share the Scata link'}, and they’ll appear here.</p>${a.isAdmin ? html`<button class="btn sm ghost" onClick=${() => a.go('invite')}>Invite families</button>` : ''}</div>` : ''}
-    ${(nearby || []).map(n => html`<div class="person">
-      <${Avatar} name=${n.first_name} />
-      <div class="grow"><b>${n.first_name}</b><div class="muted small">${n.kids} ${Number(n.kids) === 1 ? 'child' : 'children'}${n.km != null ? ` · ${n.km} km away` : ''} · ${MODE_NAME[n.mode]}</div></div>
-      ${n.status === 'none' ? html`<button class="btn sm ghost" disabled=${a.busy} onClick=${() => invite(n)}>Invite</button>`
-        : n.status === 'declined' ? html`<span class="row" style="gap:6px"><span class="status declined">Declined</span><button class="pill out" disabled=${a.busy} onClick=${() => invite(n)}>Ask again</button></span>`
-        : html`<span class=${'status ' + n.status}>${n.status === 'accepted' ? '✓ Accepted' : 'Pending'}</span>`}
-    </div>`)}
-    ${inOther.length ? html`<div class="card flat"><span>You’re also in ${inOther.map(g => ((a.people[g.id] || []).find(p => p.is_owner) || {}).first_name).join(' and ')}’s commute.</span></div>` : ''}
-    <div class="center stack" style="gap:4px"><h3>Build this commute?</h3><span class="muted">Sharing the ${a.kind.run} could save you ${isTrip(a.hub) ? `on ${tripWhen(a.hub)}` : 'each year'}:</span></div>
-    <div class="card"><${Stats} s=${sv} /></div>
-    <${Action} disabled=${!canRota} onClick=${() => a.go('calendar')}>${canRota ? 'See the rota' : 'Waiting for a family to accept'}<//>
+    <${GroupPicker} a=${a} />
+    ${g ? html`<${CommuteCard} a=${a} g=${g} />` : ''}
+    ${g && g.mine ? html`<${FillSeats} a=${a} g=${g} wide=${wide} setWide=${setWide} />` : ''}
+    ${free.length ? html`<${FindCommute} a=${a} free=${free} wide=${wide} setWide=${setWide} />` : ''}
+    ${canRota ? html`<div class="center stack" style="gap:4px"><h3>Sharing the ${a.kind.run}</h3><span class="muted">could save you ${isTrip(a.hub) ? `on ${tripWhen(a.hub)}` : 'each year'}:</span></div>
+    <div class="card"><${Stats} s=${sv} /></div>` : ''}
+    <${Action} disabled=${!canRota} onClick=${() => a.go('calendar')}>${canRota ? 'See the rota' : g ? 'Waiting for a family to join' : 'Find or start a commute above'}<//>
   </main>`;
 }
 
@@ -1496,12 +1683,14 @@ function Calendar({ a }) {
   useEffect(() => { if (single) setOffset(tripWeek(a.hub)); }, [a.hub.trip_date]);
   const [swapFrom, setSwapFrom] = useState(null);
   const { slots, err, mon, load } = useRota(a, offset);
+  const [tally, setTally] = useState(null);
+  useEffect(() => { setTally(null); if (a.gid && !single) rpc('rota_tally', { p_group: a.gid, p_week: isoDate(mon) }).then(r => setTally(r.find(x => x.parent_id === a.uid) || null), () => {}); }, [a.gid, offset, slots && slots.map(x => x.parent_id).join()]);
   useEffect(() => { if (a.gid) rpc('remind_unconfirmed').catch(() => {}); }, [a.gid]);
   if (!a.gid) return html`<main class="screen"><${Hello} a=${a} /><div class="card note"><h3>No rota yet</h3><p style="margin:0">Once a family accepts your invite, or you accept theirs, your rota appears here.</p></div><${Action} onClick=${() => a.go('manage')}>Invite families<//></main>`;
   const people = a.people[a.gid] || [];
   const who = (id) => id === a.uid ? 'You' : ((people.find(p => p.parent_id === id) || {}).first_name || 'A parent');
   const members = people.filter(p => p.status === 'accepted').length;
-  const per = members ? (single ? 2 : days.length * 2) / members : 0;
+  const per = members && slots ? slots.length / members : 0;
   const dayDate = (i) => { const x = new Date(mon); x.setDate(x.getDate() + i); return x; };
   const times = { drop: legTime(a.hub, 'drop'), pick: legTime(a.hub, 'pick') };
   const past = single ? tripPast(a.hub) : offset < 0;
@@ -1521,7 +1710,7 @@ function Calendar({ a }) {
     <${GroupPicker} a=${a} />
     <${SwapRequests} a=${a} onDone=${load} />
     ${soon.length ? html`<div class="card" style="background:var(--amber-soft);border-color:transparent"><span><b>Not confirmed yet:</b> ${soon.map(x => `${who(x.parent_id) === 'You' ? 'your' : who(x.parent_id) + '’s'} ${slotLabel(x, a.hub)}`).join(', ')}. ${soon.some(x => x.parent_id === a.uid) ? 'Tap Confirm below so everyone knows it’s covered.' : 'Tap Request update to remind them.'}</span></div>` : ''}
-    <div class="card note"><h3>Trip overview</h3><p style="margin:0">${single ? html`<b>${tripWhen(a.hub)}</b> at ${a.hub.address}. ${members} families share 2 lifts: one there and one home.${members > 2 ? ' The families not driving travel as passengers.' : ''}` : `${members} families, ${days.length} day${days.length > 1 ? 's' : ''}: that’s ${per % 1 ? per.toFixed(1) : per} trip${per === 1 ? '' : 's'} each!`}</p></div>
+    <div class="card note"><h3>Trip overview</h3><p style="margin:0">${single ? html`<b>${tripWhen(a.hub)}</b> at ${a.hub.address}. ${members} families share ${slots && slots.length ? plural(slots.length, 'lift', 'lifts') : 'the lifts'}.${members > 2 ? ' The families not driving travel as passengers.' : ''}` : slots && slots.length ? `${members} families share ${slots.length} trips this week: that’s about ${per % 1 ? per.toFixed(1) : per} each!` : `${members} families share the trips.`}</p></div>
     ${single && past ? html`<div class="card flat"><span>This trip has happened. ${a.isAdmin ? 'To reuse the group for the next one, change the date under Families → Group → Edit details.' : 'The club can set a new date for the next one.'}</span></div>` : ''}
     ${swapFrom ? html`<div class="card flat" style="background:var(--surface)"><span><b>Swapping your ${slotLabel(slots.find(x => x.id === swapFrom), a.hub)}.</b> Tap the slot you’d like instead.</span><button class="btn sm ghost" onClick=${() => setSwapFrom(null)}>Cancel swap</button></div>` : ''}
     <div class="card" style="padding:0;gap:0;overflow:hidden">
@@ -1532,13 +1721,14 @@ function Calendar({ a }) {
         <button class="iconbtn" aria-label="Next week" onClick=${() => { setSwapFrom(null); setOffset(offset + 1); }}>${I.chevR}</button>
       </div>`}
       ${err ? html`<p class="muted" style="padding:0 16px 16px;margin:0">${err}</p>` : ''}
+      ${tally && Number(tally.done) + Number(tally.owed) > 0 ? html`<p class="small" style="padding:0 16px 12px;margin:0">Your fair share up to the end of this week: <b>${Number(tally.owed) % 1 ? Number(tally.owed).toFixed(1) : Number(tally.owed)}</b> trips. You’re down to do <b>${tally.done}</b>.</p>` : ''}
       ${slots === null ? html`<p class="muted" style="padding:0 16px 16px;margin:0">Loading…</p>` : ''}
       ${slots && !slots.length && !err ? html`<p class="muted" style="padding:0 16px 16px;margin:0">No rota for this week.</p>` : ''}
       ${slots && slots.length ? shownDays.map(i => html`<div class="cal-day">
         <div class="cal-head"><span>${DAYS[i]}</span><span>${dayDate(i).toLocaleDateString('en-IE', { month: 'long', day: 'numeric' })}</span></div>
-        ${slots.filter(x => x.day === i).sort((x, y) => x.kind < y.kind ? -1 : 1).map(slot => { const mine = slot.parent_id === a.uid;
+        ${slots.filter(x => x.day === i).sort((x, y) => x.kind !== y.kind ? (x.kind < y.kind ? -1 : 1) : (x.lead || 1) - (y.lead || 1)).map(slot => { const mine = slot.parent_id === a.uid;
           return html`<div class=${'cal-slot' + (mine ? ' mine' : '') + (swapFrom && !mine ? ' picking' : '')} onClick=${() => tapSlot(slot)}>
-            <div class="cal-who"><span class="small" style="min-width:92px">${single ? html`<b>${legName(a.hub, slot.kind)[0].toUpperCase() + legName(a.hub, slot.kind).slice(1)}</b><br/>` : ''}${times[slot.kind]}</span><span class=${'dot' + (slot.confirmed ? '' : ' amber')}></span><span>${who(slot.parent_id)}</span></div>
+            <div class="cal-who"><span class="small" style="min-width:92px">${single ? html`<b>${legName(a.hub, slot.kind)[0].toUpperCase() + legName(a.hub, slot.kind).slice(1)}</b><br/>` : ''}${times[slot.kind]}</span><span class=${'dot' + (slot.confirmed ? '' : ' amber')}></span><span>${who(slot.parent_id)}${slot.lead === 2 ? html` <span class="small muted">(second adult)</span>` : ''}</span></div>
             ${gone(slot) ? html`<span class="small muted">${slot.confirmed ? 'Done' : 'Passed'}</span>` : html`<div class="row" style="gap:6px">${mine ? html`
               ${slot.confirmed ? html`<span class="status accepted small">Confirmed</span>` : html`<button class="pill" onClick=${async e => { e.stopPropagation(); await a.run(() => rpc('confirm_slot', { p_slot: slot.id }), 'Slot confirmed'); load(); }}>Confirm</button>`}
               <button class="pill violet" onClick=${e => { e.stopPropagation(); setSwapFrom(slot.id); }}>Swap</button>`
@@ -1547,7 +1737,7 @@ function Calendar({ a }) {
       </div>`) : ''}
     </div>
     <div class="card note">
-      <p style="margin:0">${single ? 'One family drives there and another drives home, so nobody does both.' : 'We share the trips out in turn. When the numbers don’t divide evenly, the extra trips move to a different family each week.'}</p>
+      <p style="margin:0">${single ? 'One family drives there and another drives home, so nobody does both.' : 'Each trip goes to the family most due one. Scata keeps a running tally of trips owed and done, so over a few weeks everyone does their fair share, and it carries over. Trips you said you can’t do go to another family whenever possible, and nobody gets two trips at the same time.'}</p>
       <p style="margin:0">Times are when the children arrive at ${a.hub.name} and when they’re collected from it, not the time at anyone’s home.</p>
       <p style="margin:0">Tap <b>Confirm</b> on your slot. If a slot doesn’t work for you, tap <b>Swap</b> and pick another parent’s slot. Once they agree, both slots are confirmed.</p>
       <div class="row" style="justify-content:center;gap:16px;font-size:13px"><span class="row" style="gap:6px"><span class="dot"></span>Confirmed</span><span class="row" style="gap:6px"><span class="dot amber"></span>Waiting</span></div>
@@ -1779,7 +1969,7 @@ function Commutes({ a }) {
 
 function Notifications({ a }) {
   useEffect(() => { const t = setTimeout(async () => { if ((a.notifications || []).some(n => !n.read)) { try { await q(sb.from('notifications').update({ read: true }).eq('user_id', a.uid).eq('read', false)); a.reload(); } catch (e) {} } }, 1500); return () => clearTimeout(t); }, []);
-  const icon = { invite: I.mail, swap: I.cal, rota: I.cal, confirm: I.cal, chat: I.heart, school: I.school, join: I.user, joined: I.school };
+  const icon = { invite: I.mail, swap: I.cal, rota: I.cal, confirm: I.cal, chat: I.heart, school: I.school, join: I.user, joined: I.school, match: I.route };
   const hubOf = (n) => n.hub_id && (a.hubs || []).find(h => h.id === n.hub_id);
   const openHub = async (n, to) => { if (!a.hub || a.hub.id !== n.hub_id) await a.switchHub(n.hub_id); a.go(to); };
   const [done, setDone] = useState({});
@@ -1792,6 +1982,7 @@ function Notifications({ a }) {
     <div class="stack" style="gap:4px">${(a.notifications || []).map(n => html`<div class=${'notif' + (n.read ? '' : ' unread')}><span class="ico">${icon[n.kind] || I.bell}</span><div class="grow"><div>${n.body}</div><div class="small muted">${ago(n.created_at)}</div>
       ${n.kind === 'confirm' && n.slot_id || (['rota', 'swap', 'confirm'].includes(n.kind) && toRota) ? html`<div class="row" style="gap:6px;margin-top:6px">${n.kind === 'confirm' && n.slot_id ? (done[n.id] ? html`<span class="status accepted small">Confirmed</span>` : html`<button class="pill" disabled=${a.busy} onClick=${() => confirmSlot(n)}>Confirm</button>`) : ''}${toRota ? html`<button class="pill out" onClick=${() => a.go('calendar')}>Open the rota</button>` : ''}</div>` : ''}
       ${n.kind === 'join' && hubOf(n) && hubOf(n).role === 'admin' ? html`<div class="row" style="gap:6px;margin-top:6px"><button class="pill" onClick=${() => openHub(n, 'hubProfile')}>Review requests</button></div>` : ''}
+      ${['invite', 'match'].includes(n.kind) && hubOf(n) && hubOf(n).commuting ? html`<div class="row" style="gap:6px;margin-top:6px"><button class="pill out" onClick=${() => hubOf(n) ? openHub(n, 'manage') : a.go('manage')}>Open My commute</button></div>` : ''}
       ${n.kind === 'joined' && hubOf(n) ? html`<div class="row" style="gap:6px;margin-top:6px"><button class="pill" onClick=${() => openHub(n, hubOf(n).commuting ? 'setup' : 'hubOverview')}>Set up my trips</button></div>` : ''}
     </div></div>`)}</div>
     ${!(a.notifications || []).length ? html`<p class="muted center">You’re all caught up.</p>` : ''}

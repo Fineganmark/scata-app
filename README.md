@@ -18,6 +18,18 @@ Accounts and data live in Supabase (Postgres with row-level security, Auth and R
 4. Optional, for the morning reminders about rota slots nobody has confirmed: Database → Extensions → turn on `pg_cron`, then run `supabase/schema.sql` again. Without it, the reminders still go out whenever someone in the commute opens the rota.
 5. Never put the `service_role` key or the database password in this repo; only the anon key belongs in `config.js`.
 
+## How families are grouped (from 19 Nov 2026)
+
+- **Who can join a group:** open (anyone with the link), approval (an admin approves each family; people invited by email go straight in) or invite only (only invited emails). New groups default to approval; groups that existed before keep working as open.
+- **Commutes:** a parent starts a commute and invites families they know (search by name, or a friend link that still needs their OK). Scata suggests families on the same route to fill spare places, and families with no commute are offered ones with room or go on the waiting list. Both sides say yes before anyone joins. For 24 hours after a suggested family joins, the others can object.
+- **Size:** car commutes hold up to 4 families, and only as many children as the smallest car fits (each family's own children plus the seats it offers). Walking, cycling and bus groups hold up to 12 children, with a second adult on each trip above 6.
+- **One commute per trip:** a family shares each trip in one commute at most: one commute for both, or one for drop-offs and another for pick-ups.
+- **Matching (straight-line estimates, no routing service):** cars within 1.5 km, walking, cycling and bus within 500 m, heading the same way to the group (within 30°), and under 5 minutes' detour for cars. Limits double for an invite-only list of under 40 families, and again when a parent widens their search.
+- **Rota:** each trip goes to the family most due one. A running tally of trips owed and done carries over from week to week, trips a family says it can't do go to others when possible, and nobody gets two trips at once.
+- **Admins** see invited, joined, in a group and waiting, and can suggest a waiting family for a commute with room.
+
+**Undo:** `supabase/rollback/2026-11-19-allocation-rollback.sql` puts the database back to how it was before this change (take a Supabase backup first, and revert the app too). Its header lists what is lost.
+
 ## Email (invites, sign-up confirmations, password resets)
 
 Supabase's built-in mailer only delivers to people on your Supabase team and only a few an hour, so real parents get nothing until this is set up. Scata uses [Resend](https://resend.com) for all email.
